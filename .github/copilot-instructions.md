@@ -5,7 +5,6 @@
 **Rapid Type** は以下を含む Rust ワークスペースです：
 - **typing-engine**: NFA ベースのタイピング入力エンジン（コアライブラリ）
 - **app-egui**: egui フレームワークで構築されたGUIアプリケーション
-- **app-tauri**: 将来の Tauri UI 実装（オプション）
 
 ビジネスロジック（エンジン）とプレゼンテーション（UI）を分離したモジュール構造のタイピングアプリケーションです。
 
@@ -56,7 +55,7 @@ cargo clippy
 
 ## ワークスペース構造
 
-### メンバー
+### メンバー (crates/ の中)
 
 - **typing-engine**: NFA ベースの入力処理エンジン
 
@@ -107,17 +106,6 @@ match engine.input('k') {
 - ビルド出力は `target/` ディレクトリに出力（`.gitignore` に含まれている）
 - NFA は build_from_tables() で全ローマ字パターンから初期化
 - トライ木構造により効率的な状態遷移を実現
-- Edition 2024 には最新の Rust ツールチェーンが必要
-
-# Cargo.toml 更新
-[workspace]
-members = ["app-egui", "typing-engine"]
-
-# app-tauri/Cargo.toml に依存を追加
-[dependencies]
-typing-engine = { path = "../typing-engine" }
-```
-
-各 UI アプリは独立したバイナリとして `target/debug/` に出力される。
-コードを生成する前に、必ずcontext7やtavilyでライブラリのAPIを確認してください。
+- 各 UI アプリは独立したバイナリとして `target/debug/` に出力される。
+- コードを生成する前に、必ずcontext7やtavilyでライブラリのAPIを確認してください。
 
