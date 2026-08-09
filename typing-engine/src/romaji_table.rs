@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-struct RomajiOption {
+#[derive(Debug, Clone)]
+pub(crate) struct RomajiOption {
     pub romaji: String,
     pub priority: u8,
 }
