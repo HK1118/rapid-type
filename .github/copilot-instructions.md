@@ -119,3 +119,5 @@ typing-engine = { path = "../typing-engine" }
 ```
 
 各 UI アプリは独立したバイナリとして `target/debug/` に出力される。
+コードを生成する前に、必ずcontext7やtavilyでライブラリのAPIを確認してください。
+
