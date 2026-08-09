@@ -8,7 +8,7 @@ use typing_engine::{EngineInputResult, TypingEngine};
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions::default();
     eframe::run_native(
-        "Rapid Type (egui)",
+        "Rapid Type",
         options,
         Box::new(|cc| {
             setup_custom_fonts(&cc.egui_ctx);
