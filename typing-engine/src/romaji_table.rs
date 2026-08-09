@@ -14,6 +14,10 @@ impl RomajiOption {
             priority,
         }
     }
+
+    pub fn from_string(romaji: String, priority: u8) -> Self {
+        Self { romaji, priority }
+    }
 }
 
 pub(crate) static ROMAJI_TABLE: LazyLock<HashMap<&'static str, Vec<RomajiOption>>> =
@@ -494,6 +498,29 @@ pub(crate) static ROMAJI_TABLE: LazyLock<HashMap<&'static str, Vec<RomajiOption>
             vec![RomajiOption::new("we", 0), RomajiOption::new("whe", 1)],
         );
         m.insert("うぉ", vec![RomajiOption::new("who", 0)]);
+
+        m
+    });
+
+pub(crate) static SYMBOL_TABLE: LazyLock<HashMap<&'static str, Vec<RomajiOption>>> =
+    LazyLock::new(|| {
+        let mut m = HashMap::new();
+
+        m.insert("ー", vec![RomajiOption::new("-", 0)]);
+        m.insert("、", vec![RomajiOption::new(",", 0)]);
+        m.insert("。", vec![RomajiOption::new(".", 0)]);
+        m.insert("！", vec![RomajiOption::new("!", 0)]);
+        m.insert("？", vec![RomajiOption::new("?", 0)]);
+        m.insert("：", vec![RomajiOption::new(":", 0)]);
+        m.insert("；", vec![RomajiOption::new(";", 0)]);
+        m.insert("・", vec![RomajiOption::new("/", 0)]);
+        m.insert("〜", vec![RomajiOption::new("~", 0)]);
+        m.insert("～", vec![RomajiOption::new("~", 0)]);
+        m.insert("（", vec![RomajiOption::new("(", 0)]);
+        m.insert("）", vec![RomajiOption::new(")", 0)]);
+        m.insert("「", vec![RomajiOption::new("[", 0)]);
+        m.insert("」", vec![RomajiOption::new("]", 0)]);
+        m.insert("　", vec![RomajiOption::new(" ", 0)]);
 
         m
     });
