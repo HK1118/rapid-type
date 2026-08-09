@@ -65,10 +65,19 @@ impl TypingEngine {
         for transition in &current.transitions {
             if transition.input == key {
                 self.current_node = transition.target;
+                // targetが終端ノードか確認
+                if self.nodes[self.current_node].is_terminal {
+                    return EngineInputResult::Completed;
+                }
                 return EngineInputResult::Accepted;
             }
         }
-        EngineInputResult::Rejected
+
+        if current.is_terminal {
+            EngineInputResult::AlreadyCompleted
+        } else {
+            EngineInputResult::Rejected
+        }
     }
 }
 
@@ -81,15 +90,18 @@ mod tests {
         let mut engine = TypingEngine::new("きゃたぴら");
 
         assert_eq!(engine.input('k'), EngineInputResult::Accepted);
+        assert_eq!(engine.input('r'), EngineInputResult::Rejected);
         assert_eq!(engine.input('i'), EngineInputResult::Accepted);
         assert_eq!(engine.input('x'), EngineInputResult::Accepted);
         assert_eq!(engine.input('y'), EngineInputResult::Accepted);
         assert_eq!(engine.input('a'), EngineInputResult::Accepted);
         assert_eq!(engine.input('t'), EngineInputResult::Accepted);
         assert_eq!(engine.input('a'), EngineInputResult::Accepted);
+        assert_eq!(engine.input('g'), EngineInputResult::Rejected);
         assert_eq!(engine.input('p'), EngineInputResult::Accepted);
         assert_eq!(engine.input('i'), EngineInputResult::Accepted);
         assert_eq!(engine.input('r'), EngineInputResult::Accepted);
-        assert_eq!(engine.input('a'), EngineInputResult::Accepted);
+        assert_eq!(engine.input('a'), EngineInputResult::Completed);
+        assert_eq!(engine.input('x'), EngineInputResult::AlreadyCompleted);
     }
 }
