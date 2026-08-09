@@ -188,8 +188,8 @@ impl TypingEngine {
         }
     }
 
-    pub fn get_guide(&self) -> String {
-        self.cached_guide.clone()
+    pub fn guide(&self) -> &str {
+        &self.cached_guide
     }
 
     pub fn completed_char_count(&self) -> usize {
@@ -856,13 +856,13 @@ mod tests {
     #[test]
     fn guide_picks_shortest_route() {
         let engine = TypingEngine::new("つ").unwrap();
-        assert_eq!(engine.get_guide(), "tu");
+        assert_eq!(engine.guide(), "tu");
     }
 
     #[test]
     fn guide_prefers_direct_yoon_after_repeated_sokuon() {
         let engine = TypingEngine::new("みっっっっちゃる").unwrap();
-        assert_eq!(engine.get_guide(), "mitttttyaru");
+        assert_eq!(engine.guide(), "mitttttyaru");
     }
 
     #[test]
@@ -874,7 +874,7 @@ mod tests {
             ("みっっっっちょる", "mitttttyoru"),
         ] {
             let engine = TypingEngine::new(kana).unwrap();
-            assert_eq!(engine.get_guide(), expected, "unexpected guide for {kana}");
+            assert_eq!(engine.guide(), expected, "unexpected guide for {kana}");
         }
     }
 
@@ -887,7 +887,7 @@ mod tests {
                 EngineInputResult::Accepted | EngineInputResult::Completed
             ));
         }
-        assert_eq!(engine.get_guide(), "yaru");
+        assert_eq!(engine.guide(), "yaru");
     }
 
     #[test]

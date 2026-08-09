@@ -175,7 +175,7 @@ impl eframe::App for TypingGameApp {
         );
 
         ui.label("Guide");
-        let full_guide = format!("{}{}", self.typed_guide_input, self.engine.get_guide());
+        let full_guide = format!("{}{}", self.typed_guide_input, self.engine.guide());
         let typed_count = self.typed_guide_input.chars().count();
         let (guide_done, guide_current, guide_remaining) = anchored_progress_segments_by_width(
             ui.ctx(),
