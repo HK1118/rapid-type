@@ -36,8 +36,8 @@ struct Node {
 pub struct TypingEngine {
     nodes: Vec<Node>,
     node_completed_chars: Vec<usize>,
-    current_states: HashSet<usize>,
-    prev_states: HashSet<usize>,
+    current_states: Vec<usize>,
+    prev_states: Vec<usize>,
     cached_guide: String,
     reading_text: String,
 }
@@ -137,8 +137,8 @@ impl TypingEngine {
         let mut engine = Self {
             nodes,
             node_completed_chars,
-            current_states: [0].into_iter().collect(),
-            prev_states: HashSet::new(),
+            current_states: vec![0],
+            prev_states: Vec::new(),
             cached_guide: String::new(),
             reading_text: input.to_string(),
         };
@@ -158,11 +158,11 @@ impl TypingEngine {
             return EngineInputResult::AlreadyCompleted;
         }
 
-        let mut next_states = HashSet::new();
+        let mut next_states = Vec::new();
         for &s_idx in &self.current_states {
             for &(ch, next_idx) in &self.nodes[s_idx].transitions {
-                if ch == c {
-                    next_states.insert(next_idx);
+                if ch == c && !next_states.contains(&next_idx) {
+                    next_states.push(next_idx);
                 }
             }
         }
@@ -230,8 +230,7 @@ impl TypingEngine {
     }
 
     fn compute_guide(&self) -> String {
-        let mut starts: Vec<usize> = self.current_states.iter().copied().collect();
-        starts.sort_unstable();
+        let starts: Vec<usize> = self.current_states.clone();
 
         let mut queue = VecDeque::new();
         let mut visited = vec![false; self.nodes.len()];
