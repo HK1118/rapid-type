@@ -101,9 +101,9 @@ impl TypingGameApp {
     }
 
     fn reset_current_problem(&mut self) {
-        let current = self.current_problem().to_string();
+        let current = self.current_problem();
         let start = Instant::now();
-        self.engine = TypingEngine::new(&current).expect("problem must be valid");
+        self.engine = TypingEngine::new(current).expect("problem must be valid");
         self.last_new_duration = start.elapsed();
         self.typed_guide_input.clear();
     }
@@ -141,17 +141,18 @@ impl TypingGameApp {
 
 impl eframe::App for TypingGameApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let events = ui.ctx().input(|i| i.events.clone());
-        for event in events {
-            if let egui::Event::Text(text) = event {
-                for c in text.chars() {
-                    if c.is_ascii_control() || c.is_whitespace() {
-                        continue;
+        ui.ctx().input(|i| {
+            for event in &i.events {
+                if let egui::Event::Text(text) = event {
+                    for c in text.chars() {
+                        if c.is_ascii_control() || c.is_whitespace() {
+                            continue;
+                        }
+                        self.handle_char_input(c);
                     }
-                    self.handle_char_input(c);
                 }
             }
-        }
+        });
 
         ui.label(format!(
             "Problem ({}/{})",
@@ -249,17 +250,22 @@ fn anchored_progress_segments_by_width(
     let completed = completed_chars.min(total_chars);
     let current_idx = completed.min(total_chars.saturating_sub(1));
 
+    let galley = ctx.fonts_mut(|fonts| {
+        fonts.layout_no_wrap(text.to_string(), font_id.clone(), egui::Color32::WHITE)
+    });
+
     let mut prefix_widths = Vec::with_capacity(total_chars + 1);
     prefix_widths.push(0.0f32);
-    for &ch in &chars {
-        let glyph_width = ctx.fonts_mut(|fonts| {
-            fonts
-                .layout_no_wrap(ch.to_string(), font_id.clone(), egui::Color32::WHITE)
-                .size()
-                .x
-        });
-        let next = prefix_widths.last().copied().unwrap_or(0.0) + glyph_width;
-        prefix_widths.push(next);
+
+    if let Some(row) = galley.rows.first() {
+        for glyph in &row.glyphs {
+            prefix_widths.push(glyph.max_x());
+        }
+    }
+
+    while prefix_widths.len() <= total_chars {
+        let last = prefix_widths.last().copied().unwrap_or(0.0);
+        prefix_widths.push(last + font_id.size * 0.5);
     }
 
     let clamped_width = max_width.max(font_id.size * 4.0);
