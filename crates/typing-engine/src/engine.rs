@@ -272,6 +272,18 @@ impl TypingEngine {
 
         guide_chars.into_iter().collect()
     }
+
+    pub fn is_completed(&self) -> bool {
+        self.current_states
+            .iter()
+            .any(|&idx| self.nodes[idx].is_terminal)
+    }
+
+    pub fn reset(&mut self) {
+        self.current_states = vec![0];
+        self.cached_guide = self.compute_guide();
+        self.prev_states = self.current_states.clone();
+    }
 }
 
 fn tokenize(input: &str) -> Vec<String> {
