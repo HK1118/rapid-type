@@ -196,39 +196,42 @@ impl eframe::App for TypingGameApp {
             ))
             .extend(),
         );
-        ui.label(format!(
-            "Progress: {} / {}",
-            self.engine.completed_char_count(),
-            self.current_problem().chars().count()
-        ));
-        ui.label(format!("Completed: {}", self.engine.completed_reading()));
-        ui.label(format!(
-            "Furthest: {}",
-            self.engine.furthest_completed_reading()
-        ));
-        ui.separator();
-        ui.label(format!("Status: {}", self.status_message));
-        ui.label(format!(
-            "Debug timings: new={} / input={}",
-            format_duration(self.last_new_duration),
-            format_duration(self.last_input_duration)
-        ));
-        let problem_anchor_idx = self
-            .engine
-            .completed_char_count()
-            .min(self.current_problem().chars().count().saturating_sub(1));
-        let guide_anchor_idx = typed_count.min(full_guide.chars().count().saturating_sub(1));
-        ui.label(format!(
-            "Debug anchor idx: problem={} / guide={} (target {:.0}%)",
-            problem_anchor_idx,
-            guide_anchor_idx,
-            problem_anchor_ratio * 100.0
-        ));
-        ui.label("Type keys while this window is focused.");
 
-        if ui.button("Skip to next problem").clicked() {
-            self.advance_problem();
-            self.status_message = "Skipped to next problem.".to_string();
+        if cfg!(debug_assertions) {
+            ui.label(format!(
+                "Progress: {} / {}",
+                self.engine.completed_char_count(),
+                self.current_problem().chars().count()
+            ));
+            ui.label(format!("Completed: {}", self.engine.completed_reading()));
+            ui.label(format!(
+                "Furthest: {}",
+                self.engine.furthest_completed_reading()
+            ));
+            ui.separator();
+            ui.label(format!("Status: {}", self.status_message));
+            ui.label(format!(
+                "Debug timings: new={} / input={}",
+                format_duration(self.last_new_duration),
+                format_duration(self.last_input_duration)
+            ));
+            let problem_anchor_idx = self
+                .engine
+                .completed_char_count()
+                .min(self.current_problem().chars().count().saturating_sub(1));
+            let guide_anchor_idx = typed_count.min(full_guide.chars().count().saturating_sub(1));
+            ui.label(format!(
+                "Debug anchor idx: problem={} / guide={} (target {:.0}%)",
+                problem_anchor_idx,
+                guide_anchor_idx,
+                problem_anchor_ratio * 100.0
+            ));
+            ui.label("Type keys while this window is focused.");
+
+            if ui.button("Skip to next problem").clicked() {
+                self.advance_problem();
+                self.status_message = "Skipped to next problem.".to_string();
+            }
         }
     }
 }
