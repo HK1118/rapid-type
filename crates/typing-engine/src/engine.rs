@@ -30,12 +30,12 @@ impl BuildOption {
 struct Node {
     transitions: Vec<(char, usize)>,
     is_terminal: bool,
+    completed_chars: usize,
 }
 
 #[derive(Debug, Clone)]
 pub struct TypingEngine {
     nodes: Vec<Node>,
-    node_completed_chars: Vec<usize>,
     current_states: Vec<usize>,
     prev_states: Vec<usize>,
     cached_guide: String,
@@ -45,7 +45,6 @@ pub struct TypingEngine {
 impl TypingEngine {
     pub fn new(input: &str) -> Result<Self, String> {
         let mut nodes = vec![Node::default()];
-        let mut node_completed_chars = vec![0usize];
         let mut parent = 0usize;
         let tokens = tokenize(input);
 
@@ -74,8 +73,10 @@ impl TypingEngine {
                 .sum::<usize>();
 
             let merge_node = nodes.len();
-            nodes.push(Node::default());
-            node_completed_chars.push(node_completed_chars[parent] + consumed_chars);
+            nodes.push(Node {
+                completed_chars: nodes[parent].completed_chars + consumed_chars,
+                ..Default::default()
+            });
 
             for opt in options {
                 let chars: Vec<char> = opt.romaji.chars().collect();
@@ -111,8 +112,10 @@ impl TypingEngine {
                             next_idx
                         } else {
                             let new_idx = nodes.len();
-                            nodes.push(Node::default());
-                            node_completed_chars.push(node_completed_chars[curr]);
+                            nodes.push(Node {
+                                completed_chars: nodes[curr].completed_chars,
+                                ..Default::default()
+                            });
                             nodes[curr].transitions.push((c, new_idx));
                             new_idx
                         };
@@ -120,8 +123,9 @@ impl TypingEngine {
                         let consumed_input_chars = j + 1;
                         for &(marker_input_chars, marker_completed_chars) in &progress_markers {
                             if marker_input_chars == consumed_input_chars {
-                                node_completed_chars[curr] = node_completed_chars[curr]
-                                    .max(node_completed_chars[parent] + marker_completed_chars);
+                                nodes[curr].completed_chars = nodes[curr]
+                                    .completed_chars
+                                    .max(nodes[parent].completed_chars + marker_completed_chars);
                             }
                         }
                     }
@@ -136,7 +140,6 @@ impl TypingEngine {
 
         let mut engine = Self {
             nodes,
-            node_completed_chars,
             current_states: vec![0],
             prev_states: Vec::new(),
             cached_guide: String::new(),
@@ -205,7 +208,7 @@ impl TypingEngine {
         let mut max = 0usize;
 
         for &state in &self.current_states {
-            let completed = self.node_completed_chars[state];
+            let completed = self.nodes[state].completed_chars;
             min = min.min(completed);
             max = max.max(completed);
         }
