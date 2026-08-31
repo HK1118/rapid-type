@@ -520,7 +520,7 @@ pub(crate) static SYMBOL_TABLE: LazyLock<HashMap<&'static str, Vec<RomajiOption>
         m.insert("）", vec![RomajiOption::new(")", 0)]);
         m.insert("「", vec![RomajiOption::new("[", 0)]);
         m.insert("」", vec![RomajiOption::new("]", 0)]);
-        m.insert("　", vec![RomajiOption::new(" ", 0)]);
-
+        m.insert("　", vec![RomajiOption::new(" ", 0)]); // 半角スペース
+        m.insert("　", vec![RomajiOption::new(" ", 0)]); // 全角スペースを半角スペースで入力可能に
         m
     });
