@@ -274,7 +274,7 @@ mod tests {
 
     #[test]
     fn test_session_loads_first_question() {
-        let problems = vec![Question::new("かんかんにおこる")];
+        let problems = vec![Question::from_ruby("かんかんに[怒|おこ]る")];
         let mode = GameMode::Normal {
             questions: problems,
         };

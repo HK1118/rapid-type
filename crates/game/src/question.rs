@@ -15,12 +15,6 @@ pub struct Question {
 }
 
 impl Question {
-    // 問題の読みと表示は一旦同じ文字列にする。
-    pub fn new(reading: impl Into<String>) -> Self {
-        let r = reading.into();
-        Self::from_ruby(&r)
-    }
-
     pub fn from_ruby(text: &str) -> Self {
         let segments = parse_ruby(text).unwrap_or_else(|err| {
             panic!("問題のルビ記法に誤りがあります: {err}");

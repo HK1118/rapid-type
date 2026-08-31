@@ -91,7 +91,7 @@ pub fn easy_pool() -> Vec<Question> {
         Question::from_ruby("[太|たい][陽|よう]"),
         Question::from_ruby("たこ[焼|や]き"),
         Question::from_ruby("タマネギ"),
-        Question::from_ruby("[狸|たぬき][寝|ね]入り"),
+        Question::from_ruby("[狸|たぬき][寝|ね][入|い]り"),
         Question::from_ruby("タンポポ"),
         Question::from_ruby("[大|だい][根|こん]"),
         Question::from_ruby("チョコレート"),
