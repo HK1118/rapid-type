@@ -253,12 +253,18 @@ impl TypingGameApp {
     }
 
     fn ui_playing(&mut self, ui: &mut egui::Ui) {
+        // キー入力イベントの処理
         ui.ctx().input(|i| {
             for event in &i.events {
                 if let egui::Event::Text(text) = event {
-                    for c in text.chars() {
-                        if c.is_ascii_control() || c.is_whitespace() {
+                    for mut c in text.chars() {
+                        // 改行やタブ・制御文字のみスキップ（スペースは許可）
+                        if c == '\n' || c == '\r' || c == '\t' || c.is_ascii_control() {
                             continue;
+                        }
+                        // 全角スペースを半角スペースに正規化
+                        if c == '　' {
+                            c = ' ';
                         }
                         self.handle_char_input(c);
                     }
@@ -275,24 +281,51 @@ impl TypingGameApp {
                     self.selected_difficulty.label()
                 ));
 
-                let problem_anchor_ratio = 0.35;
+                ui.add_space(20.0);
+
+                let anchor_ratio = 0.35; // 現在打っている文字の画面横位置（左から35%）
                 if let Some(progress) = session.current_progress() {
-                    let (done, current, remaining) = render::anchored_progress_segments_by_width(
-                        ui.ctx(),
-                        &question.reading,
-                        progress.completed_chars,
-                        ui.available_width(),
-                        problem_anchor_ratio,
-                        egui::FontId::new(56.0, egui::FontFamily::Proportional),
-                    );
+                    // --- 1段目: 漢字表示テキスト ---
+                    let display_completed =
+                        question.display_completed_chars(progress.completed_chars);
+                    let (disp_done, disp_curr, disp_rem) =
+                        render::anchored_progress_segments_by_width(
+                            ui.ctx(),
+                            &question.display,
+                            display_completed,
+                            ui.available_width(),
+                            anchor_ratio,
+                            egui::FontId::new(48.0, egui::FontFamily::Proportional),
+                        );
                     ui.add(
                         egui::Label::new(render::colored_progress_job(
-                            &done, &current, &remaining, 56.0, true,
+                            &disp_done, &disp_curr, &disp_rem, 48.0, true,
                         ))
                         .extend(),
                     );
 
-                    ui.label("ローマ字ガイド");
+                    ui.add_space(5.0);
+
+                    // --- 2段目: ひらがな読み ---
+                    let (read_done, read_curr, read_rem) =
+                        render::anchored_progress_segments_by_width(
+                            ui.ctx(),
+                            &question.reading,
+                            progress.completed_chars,
+                            ui.available_width(),
+                            anchor_ratio,
+                            egui::FontId::new(26.0, egui::FontFamily::Proportional),
+                        );
+                    ui.add(
+                        egui::Label::new(render::colored_progress_job(
+                            &read_done, &read_curr, &read_rem, 26.0, true,
+                        ))
+                        .extend(),
+                    );
+
+                    ui.add_space(5.0);
+
+                    // --- 3段目: ローマ字ガイド ---
                     let full_guide = format!("{}{}", progress.typed_romaji, progress.guide);
                     let typed_count = progress.typed_romaji_count;
                     let (guide_done, guide_current, guide_remaining) =
@@ -301,15 +334,15 @@ impl TypingGameApp {
                             &full_guide,
                             typed_count,
                             ui.available_width(),
-                            problem_anchor_ratio,
-                            egui::FontId::new(44.0, egui::FontFamily::Monospace),
+                            anchor_ratio,
+                            egui::FontId::new(36.0, egui::FontFamily::Monospace),
                         );
                     ui.add(
                         egui::Label::new(render::colored_progress_job(
                             &guide_done,
                             &guide_current,
                             &guide_remaining,
-                            44.0,
+                            36.0,
                             false,
                         ))
                         .extend(),
@@ -318,6 +351,7 @@ impl TypingGameApp {
             }
 
             if cfg!(debug_assertions) {
+                ui.add_space(20.0);
                 ui.label(format!("Status: {}", self.status_message));
                 ui.label(format!("Game Status: {:?}", session.status));
                 if let Some(remaining) = session.remaining_time() {

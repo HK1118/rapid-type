@@ -8,8 +8,13 @@ use typing_engine::TypingEngine;
 
 #[derive(Debug, Clone)]
 pub enum GameMode {
-    Normal { questions: Vec<Question> },
-    TimeAttack { time_limit: Duration, pool: Vec<Question> },
+    Normal {
+        questions: Vec<Question>,
+    },
+    TimeAttack {
+        time_limit: Duration,
+        pool: Vec<Question>,
+    },
 }
 
 pub struct Session {
@@ -60,7 +65,7 @@ impl Session {
         self.load_current_question();
     }
 
-    pub fn submit_input(&mut self, c: char) -> InputResult {
+    pub fn submit_input(&mut self, input: char) -> InputResult {
         if self.status != Status::Playing {
             return InputResult::AlreadyCompleted;
         }
@@ -70,17 +75,25 @@ impl Session {
             return InputResult::TimeUp;
         }
 
-        let input = c.to_ascii_lowercase();
-        
+        // let input = c.to_ascii_lowercase();
+
         let result = {
             let Some(engine) = self.active_engine.as_mut() else {
                 return InputResult::AlreadyCompleted;
             };
             engine.input(input)
         };
-        
+
         let mut progress = self.build_progress(self.active_engine.as_ref().unwrap());
-        let expected = self.active_engine.as_ref().unwrap().guide().chars().next().map(|c| c.to_string()).unwrap_or_default();
+        let expected = self
+            .active_engine
+            .as_ref()
+            .unwrap()
+            .guide()
+            .chars()
+            .next()
+            .map(|c| c.to_string())
+            .unwrap_or_default();
 
         match result {
             typing_engine::EngineInputResult::Accepted => {
@@ -124,7 +137,9 @@ impl Session {
     }
 
     pub fn current_progress(&self) -> Option<Progress> {
-        self.active_engine.as_ref().map(|engine| self.build_progress(engine))
+        self.active_engine
+            .as_ref()
+            .map(|engine| self.build_progress(engine))
     }
 
     pub fn remaining_time(&self) -> Option<Duration> {
@@ -144,7 +159,8 @@ impl Session {
         if !self.is_finished() {
             return None;
         }
-        let total_time = self.start_time
+        let total_time = self
+            .start_time
             .zip(self.end_time)
             .map(|(s, e)| e.duration_since(s))
             .unwrap_or_default();
@@ -199,7 +215,9 @@ impl Session {
     fn build_progress(&self, engine: &TypingEngine) -> Progress {
         Progress {
             completed_chars: engine.completed_char_count(),
-            total_chars: engine.furthest_completed_char_count().max(engine.completed_char_count()),
+            total_chars: engine
+                .furthest_completed_char_count()
+                .max(engine.completed_char_count()),
             guide: engine.guide().to_string(),
             typed_romaji: self.typed_romaji.clone(),
             typed_romaji_count: self.typed_romaji_count,
@@ -207,7 +225,10 @@ impl Session {
     }
 
     fn finish_question(&mut self) -> QuestionStats {
-        let elapsed = self.question_start_time.map(|s| s.elapsed()).unwrap_or_default();
+        let elapsed = self
+            .question_start_time
+            .map(|s| s.elapsed())
+            .unwrap_or_default();
         let q_stats = QuestionStats::from_stats(&self.stats, elapsed);
         self.question_stats.push(q_stats.clone());
 
@@ -236,9 +257,10 @@ impl Session {
 
     fn is_time_up(&self) -> bool {
         match &self.mode {
-            GameMode::TimeAttack { time_limit, .. } => {
-                self.start_time.map(|s| s.elapsed() >= *time_limit).unwrap_or(false)
-            }
+            GameMode::TimeAttack { time_limit, .. } => self
+                .start_time
+                .map(|s| s.elapsed() >= *time_limit)
+                .unwrap_or(false),
             GameMode::Normal { .. } => false,
         }
     }
@@ -252,16 +274,19 @@ mod tests {
 
     #[test]
     fn test_session_loads_first_question() {
-        let problems = vec![
-            Question::new("かんかんにおこる"),
-        ];
-        let mode = GameMode::Normal { questions: problems };
+        let problems = vec![Question::new("かんかんにおこる")];
+        let mode = GameMode::Normal {
+            questions: problems,
+        };
         let mut session = Session::new(mode);
         session.start();
-        
+
         assert_eq!(session.status, Status::Playing);
         assert!(session.current_question().is_some());
         assert!(session.active_engine.is_some());
-        println!("First question guide: {}", session.current_progress().unwrap().guide);
+        println!(
+            "First question guide: {}",
+            session.current_progress().unwrap().guide
+        );
     }
 }

@@ -1,5 +1,5 @@
-use std::time::Duration;
 use crate::stats::Stats;
+use std::time::Duration;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Progress {

@@ -326,8 +326,14 @@ fn resolve_options(token: &str, next_token: Option<&str>) -> Result<Vec<RomajiOp
     if let Some(symbols) = symbol_options(token) {
         return Ok(symbols);
     }
+    if let Some(kanas) = kana_options(token) {
+        return Ok(kanas);
+    }
+    if token.is_ascii() {
+        return Ok(vec![RomajiOption::new(token, 0)]);
+    }
 
-    kana_options(token).ok_or_else(|| format!("\"{}\" is not in ROMAJI_TABLE/SYMBOL_TABLE", token))
+    Err(format!("\"{}\" is not in ROMAJI_TABLE/SYMBOL_TABLE", token))
 }
 
 fn resolve_build_options(
@@ -992,5 +998,35 @@ mod tests {
         assert!(matches!(engine.input('n'), EngineInputResult::Accepted));
         assert!(matches!(engine.input('n'), EngineInputResult::Accepted));
         assert!(matches!(engine.input('i'), EngineInputResult::Completed));
+    }
+
+    #[test]
+    fn allows_raw_ascii_and_mixed_sentence() {
+        let mut engine = TypingEngine::new("println!(\"Hello, 123\");").unwrap();
+        let text = "println!(\"Hello, 123\");";
+        let chars: Vec<char> = text.chars().collect();
+
+        for c in &chars[..chars.len() - 1] {
+            assert_eq!(
+                engine.input(*c),
+                EngineInputResult::Accepted,
+                "Failed at char: '{}'",
+                c
+            );
+        }
+        assert_eq!(
+            engine.input(chars[chars.len() - 1]),
+            EngineInputResult::Completed
+        );
+    }
+
+    #[test]
+    fn allows_japanese_and_ascii_mixed() {
+        let mut engine = TypingEngine::new("Webさいとをみる").unwrap();
+        let text = "Websaitowomiru";
+        for c in text.chars().take(text.len() - 1) {
+            assert_eq!(engine.input(c), EngineInputResult::Accepted);
+        }
+        assert_eq!(engine.input('u'), EngineInputResult::Completed);
     }
 }
