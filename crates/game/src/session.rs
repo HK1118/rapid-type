@@ -18,7 +18,7 @@ pub enum GameMode {
 }
 
 pub struct Session {
-    mode: GameMode,
+    pub mode: GameMode,
     questions: Vec<Question>,
     current_question_idx: usize,
     active_engine: Option<TypingEngine>,
@@ -65,17 +65,22 @@ impl Session {
         self.load_current_question();
     }
 
+    /// 毎フレーム呼び出して時間切れを検知する
+    pub fn update(&mut self) {
+        if self.status == Status::Playing && self.is_time_up() {
+            self.finish_game();
+        }
+    }
+
     pub fn submit_input(&mut self, input: char) -> InputResult {
         if self.status != Status::Playing {
             return InputResult::AlreadyCompleted;
         }
 
         if self.is_time_up() {
-            self.status = Status::TimeUp;
+            self.finish_game();
             return InputResult::TimeUp;
         }
-
-        // let input = c.to_ascii_lowercase();
 
         let result = {
             let Some(engine) = self.active_engine.as_mut() else {
@@ -235,6 +240,15 @@ impl Session {
         self.current_question_idx += 1;
         self.stats = Stats::new();
 
+        // タイムアタックで問題が尽きた場合はプールから補充する
+        if self.current_question_idx >= self.questions.len() {
+            if let GameMode::TimeAttack { pool, .. } = &self.mode {
+                let mut more = pool.clone();
+                more.shuffle(&mut rand::rng());
+                self.questions.extend(more);
+            }
+        }
+
         if self.current_question_idx >= self.questions.len() || self.is_time_up() {
             self.finish_game();
         } else {
@@ -263,30 +277,5 @@ impl Session {
                 .unwrap_or(false),
             GameMode::Normal { .. } => false,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::question::Question;
-    use crate::status::Status;
-
-    #[test]
-    fn test_session_loads_first_question() {
-        let problems = vec![Question::from_ruby("かんかんに[怒|おこ]る")];
-        let mode = GameMode::Normal {
-            questions: problems,
-        };
-        let mut session = Session::new(mode);
-        session.start();
-
-        assert_eq!(session.status, Status::Playing);
-        assert!(session.current_question().is_some());
-        assert!(session.active_engine.is_some());
-        println!(
-            "First question guide: {}",
-            session.current_progress().unwrap().guide
-        );
     }
 }

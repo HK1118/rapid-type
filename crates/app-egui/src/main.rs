@@ -6,7 +6,7 @@ mod render;
 use eframe::egui;
 use game::{Difficulty, GameMode, Question, Session};
 use rand::seq::SliceRandom;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions::default();
@@ -63,9 +63,26 @@ fn setup_custom_fonts(ctx: &egui::Context) {
     ctx.set_global_style(style);
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum PlayMode {
+    #[default]
+    Normal,
+    TimeAttack,
+}
+
+impl PlayMode {
+    fn label(&self) -> &'static str {
+        match self {
+            PlayMode::Normal => "ノーマル (10問)",
+            PlayMode::TimeAttack => "タイムアタック",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Screen {
     Title,
+    ModeSelect,
     DifficultySelect,
     Ready,
     Countdown,
@@ -76,9 +93,11 @@ enum Screen {
 struct TypingGameApp {
     screen: Screen,
     session: Option<Session>,
+    selected_mode: PlayMode,
     selected_difficulty: Difficulty,
     status_message: String,
     title_cursor: usize,  // 0: 開始, 1: 終了
+    mode_cursor: usize,   // 0: ノーマル, 1: タイムアタック
     result_cursor: usize, // 0: もう一度遊ぶ, 1: タイトルに戻る
     countdown_start: Option<Instant>,
 }
@@ -88,22 +107,34 @@ impl TypingGameApp {
         Self {
             screen: Screen::Title,
             session: None,
+            selected_mode: PlayMode::default(),
             selected_difficulty: Difficulty::default(),
             status_message: String::new(),
             title_cursor: 0,
+            mode_cursor: 0,
             result_cursor: 0,
             countdown_start: None,
         }
     }
 
     fn start_game(&mut self) {
+        let mut rng = rand::rng();
         let mut all_problems = self.selected_difficulty.pool();
-        all_problems.shuffle(&mut rand::rng());
-        let problems: Vec<Question> = all_problems.into_iter().take(10).collect();
+        all_problems.shuffle(&mut rng);
 
-        let mode = GameMode::Normal {
-            questions: problems,
+        let mode = match self.selected_mode {
+            PlayMode::Normal => {
+                let problems: Vec<Question> = all_problems.into_iter().take(10).collect();
+                GameMode::Normal {
+                    questions: problems,
+                }
+            }
+            PlayMode::TimeAttack => GameMode::TimeAttack {
+                time_limit: Duration::from_secs(60),
+                pool: all_problems,
+            },
         };
+
         let mut session = Session::new(mode);
         session.start();
 
@@ -159,7 +190,6 @@ impl TypingGameApp {
     }
 
     fn ui_title(&mut self, ui: &mut egui::Ui) {
-        // Vimカーソル移動 (j/k) & 決定 (l/Enter/Space) & 終了 (q/Esc)
         if ui.input(|i| i.key_pressed(egui::Key::J) || i.key_pressed(egui::Key::ArrowDown)) {
             self.title_cursor = (self.title_cursor + 1).min(1);
         }
@@ -172,7 +202,7 @@ impl TypingGameApp {
                 || i.key_pressed(egui::Key::Enter)
         }) {
             if self.title_cursor == 0 {
-                self.screen = Screen::DifficultySelect;
+                self.screen = Screen::ModeSelect;
             } else {
                 std::process::exit(0);
             }
@@ -188,8 +218,8 @@ impl TypingGameApp {
                 .data_mut(|d| d.get_temp(content_id))
                 .unwrap_or(360.0);
 
-            let available_height逗 = ui.available_height();
-            let top_space = ((available_height逗 - prev_height) * 0.42).max(0.0);
+            let available_height = ui.available_height();
+            let top_space = ((available_height - prev_height) * 0.42).max(0.0);
             ui.add_space(top_space);
 
             let response = ui.scope(|ui| {
@@ -199,7 +229,7 @@ impl TypingGameApp {
                 );
                 ui.add_space(10.0);
 
-                ui.label("タイピング練習");
+                ui.label("タイピング練習ゲーム");
                 ui.add_space(25.0);
 
                 let btn_size = egui::vec2(200.0, 46.0);
@@ -215,7 +245,7 @@ impl TypingGameApp {
                     .clicked()
                 {
                     self.title_cursor = 0;
-                    self.screen = Screen::DifficultySelect;
+                    self.screen = Screen::ModeSelect;
                 }
                 ui.add_space(8.0);
 
@@ -247,6 +277,91 @@ impl TypingGameApp {
         });
     }
 
+    /// モード選択画面 (ノーマル / タイムアタック)
+    fn ui_mode_select(&mut self, ui: &mut egui::Ui) {
+        if ui.input(|i| i.key_pressed(egui::Key::J) || i.key_pressed(egui::Key::ArrowDown)) {
+            self.mode_cursor = (self.mode_cursor + 1).min(1);
+        }
+        if ui.input(|i| i.key_pressed(egui::Key::K) || i.key_pressed(egui::Key::ArrowUp)) {
+            self.mode_cursor = self.mode_cursor.saturating_sub(1);
+        }
+
+        self.selected_mode = if self.mode_cursor == 0 {
+            PlayMode::Normal
+        } else {
+            PlayMode::TimeAttack
+        };
+
+        if ui.input(|i| {
+            i.key_pressed(egui::Key::L)
+                || i.key_pressed(egui::Key::Space)
+                || i.key_pressed(egui::Key::Enter)
+        }) {
+            self.screen = Screen::DifficultySelect;
+        }
+        if ui.input(|i| {
+            i.key_pressed(egui::Key::H)
+                || i.key_pressed(egui::Key::Q)
+                || i.key_pressed(egui::Key::Escape)
+        }) {
+            self.screen = Screen::Title;
+        }
+
+        ui.vertical_centered(|ui| {
+            ui.add_space(50.0);
+            ui.heading("モードを選択");
+            ui.add_space(30.0);
+
+            let btn_size = egui::vec2(260.0, 50.0);
+            let is_normal = self.selected_mode == PlayMode::Normal;
+            let is_time_attack = self.selected_mode == PlayMode::TimeAttack;
+
+            if ui
+                .add_sized(btn_size, egui::Button::selectable(is_normal, "ノーマル"))
+                .clicked()
+            {
+                self.mode_cursor = 0;
+                self.selected_mode = PlayMode::Normal;
+            }
+            ui.add_space(8.0);
+
+            if ui
+                .add_sized(
+                    btn_size,
+                    egui::Button::selectable(is_time_attack, "タイムアタック"),
+                )
+                .clicked()
+            {
+                self.mode_cursor = 1;
+                self.selected_mode = PlayMode::TimeAttack;
+            }
+
+            ui.add_space(35.0);
+
+            let action_btn_size = egui::vec2(220.0, 46.0);
+            if ui
+                .add_sized(action_btn_size, egui::Button::new("次へ進む"))
+                .clicked()
+            {
+                self.screen = Screen::DifficultySelect;
+            }
+            ui.add_space(8.0);
+            if ui
+                .add_sized(action_btn_size, egui::Button::new("タイトルに戻る"))
+                .clicked()
+            {
+                self.screen = Screen::Title;
+            }
+
+            ui.add_space(25.0);
+            ui.label(
+                egui::RichText::new("[↑ / ↓] 移動　　[Space / Enter] 決定　　[q / Esc] 戻る")
+                    .color(egui::Color32::from_gray(130))
+                    .size(15.0),
+            );
+        });
+    }
+
     fn ui_difficulty_select(&mut self, ui: &mut egui::Ui) {
         let difficulties = [Difficulty::Easy, Difficulty::Normal, Difficulty::Hard];
         let mut current_idx = match self.selected_difficulty {
@@ -255,7 +370,6 @@ impl TypingGameApp {
             Difficulty::Hard => 2,
         };
 
-        // Vim移動 (j/k)
         if ui.input(|i| i.key_pressed(egui::Key::J) || i.key_pressed(egui::Key::ArrowDown)) {
             current_idx = (current_idx + 1).min(difficulties.len() - 1);
             self.selected_difficulty = difficulties[current_idx];
@@ -265,7 +379,6 @@ impl TypingGameApp {
             self.selected_difficulty = difficulties[current_idx];
         }
 
-        // 決定 (l / Enter / Space) -> 開始待機画面(Ready)へ進む
         if ui.input(|i| {
             i.key_pressed(egui::Key::L)
                 || i.key_pressed(egui::Key::Space)
@@ -274,13 +387,12 @@ impl TypingGameApp {
             self.screen = Screen::Ready;
         }
 
-        // 戻る (h / q / Esc)
         if ui.input(|i| {
             i.key_pressed(egui::Key::H)
                 || i.key_pressed(egui::Key::Q)
                 || i.key_pressed(egui::Key::Escape)
         }) {
-            self.screen = Screen::Title;
+            self.screen = Screen::ModeSelect;
         }
 
         ui.vertical_centered(|ui| {
@@ -324,7 +436,7 @@ impl TypingGameApp {
             let action_btn_size = egui::vec2(220.0, 46.0);
 
             if ui
-                .add_sized(action_btn_size, egui::Button::new("ゲームを開始"))
+                .add_sized(action_btn_size, egui::Button::new("次へ進む"))
                 .clicked()
             {
                 self.screen = Screen::Ready;
@@ -332,10 +444,10 @@ impl TypingGameApp {
 
             ui.add_space(8.0);
             if ui
-                .add_sized(action_btn_size, egui::Button::new("タイトルに戻る"))
+                .add_sized(action_btn_size, egui::Button::new("モード選択に戻る"))
                 .clicked()
             {
-                self.screen = Screen::Title;
+                self.screen = Screen::ModeSelect;
             }
 
             ui.add_space(25.0);
@@ -347,7 +459,6 @@ impl TypingGameApp {
         });
     }
 
-    /// 開始待機画面（Spaceを押してカウントダウンへ）
     fn ui_ready(&mut self, ui: &mut egui::Ui) {
         if ui.input(|i| {
             i.key_pressed(egui::Key::Space)
@@ -367,14 +478,18 @@ impl TypingGameApp {
         }
 
         ui.vertical_centered(|ui| {
-            ui.add_space(100.0);
+            ui.add_space(90.0);
 
             ui.label(
-                egui::RichText::new(format!("難易度: {}", self.selected_difficulty.label()))
-                    .color(egui::Color32::from_gray(180))
-                    .size(22.0),
+                egui::RichText::new(format!(
+                    "{}  /  {}",
+                    self.selected_mode.label(),
+                    self.selected_difficulty.label()
+                ))
+                .color(egui::Color32::from_gray(180))
+                .size(20.0),
             );
-            ui.add_space(30.0);
+            ui.add_space(25.0);
 
             ui.label(
                 egui::RichText::new("Spaceキーを押して開始")
@@ -382,7 +497,7 @@ impl TypingGameApp {
                     .size(42.0),
             );
 
-            ui.add_space(50.0);
+            ui.add_space(45.0);
 
             let btn_size = egui::vec2(220.0, 46.0);
 
@@ -393,7 +508,7 @@ impl TypingGameApp {
                 self.screen = Screen::DifficultySelect;
             }
 
-            ui.add_space(40.0);
+            ui.add_space(35.0);
             ui.label(
                 egui::RichText::new("[q / Esc] 戻る")
                     .color(egui::Color32::from_gray(130))
@@ -402,9 +517,7 @@ impl TypingGameApp {
         });
     }
 
-    /// 3秒カウントダウン画面 (3 -> 2 -> 1 -> 開始)
     fn ui_countdown(&mut self, ui: &mut egui::Ui) {
-        // カウントダウン中は常に画面を再描画
         ui.ctx().request_repaint();
 
         let Some(start_time) = self.countdown_start else {
@@ -414,7 +527,6 @@ impl TypingGameApp {
 
         let elapsed = start_time.elapsed().as_secs_f32();
 
-        // 3秒経過したらゲーム開始
         if elapsed >= 3.0 {
             self.countdown_start = None;
             self.start_game();
@@ -427,13 +539,16 @@ impl TypingGameApp {
             ui.add_space(110.0);
 
             ui.label(
-                egui::RichText::new(format!("難易度: {}", self.selected_difficulty.label()))
-                    .color(egui::Color32::from_gray(160))
-                    .size(20.0),
+                egui::RichText::new(format!(
+                    "{}  /  {}",
+                    self.selected_mode.label(),
+                    self.selected_difficulty.label()
+                ))
+                .color(egui::Color32::from_gray(160))
+                .size(20.0),
             );
             ui.add_space(30.0);
 
-            // カウントダウン数字（巨大表示）
             ui.label(
                 egui::RichText::new(format!("{count_num}"))
                     .color(egui::Color32::from_rgb(255, 215, 0))
@@ -450,11 +565,26 @@ impl TypingGameApp {
             return;
         }
 
-        // [Tab] または [F5] で即時リトライ（カウントダウンからやり直し）
+        // [Tab] または [F5] で即時リトライ
         if ui.input(|i| i.key_pressed(egui::Key::Tab) || i.key_pressed(egui::Key::F5)) {
             self.countdown_start = Some(Instant::now());
             self.screen = Screen::Countdown;
             return;
+        }
+
+        // タイムアタック時のタイマー更新・再描画
+        if self.selected_mode == PlayMode::TimeAttack {
+            ui.ctx().request_repaint();
+        }
+
+        // セッションの状態更新（時間切れチェック）
+        if let Some(session) = self.session.as_mut() {
+            session.update();
+            if session.is_finished() {
+                self.result_cursor = 0;
+                self.screen = Screen::Result;
+                return;
+            }
         }
 
         ui.ctx().input(|i| {
@@ -475,17 +605,41 @@ impl TypingGameApp {
 
         if let Some(session) = self.session.as_ref() {
             if let Some(question) = session.current_question() {
+                // ヘッダー情報（問題番号 or タイマー）
                 ui.horizontal(|ui| {
-                    ui.label(format!(
-                        "問題 ({}/{}) - {}",
-                        session.current_question_index() + 1,
-                        session.total_questions(),
-                        self.selected_difficulty.label()
-                    ));
+                    match &session.mode {
+                        GameMode::Normal { .. } => {
+                            ui.label(format!(
+                                "問題 ({}/{}) - {}",
+                                session.current_question_index() + 1,
+                                session.total_questions(),
+                                self.selected_difficulty.label()
+                            ));
+                        }
+                        GameMode::TimeAttack { .. } => {
+                            let rem_secs =
+                                session.remaining_time().unwrap_or_default().as_secs_f32();
+                            let color = if rem_secs <= 10.0 {
+                                egui::Color32::from_rgb(255, 90, 90)
+                            } else {
+                                egui::Color32::from_rgb(255, 220, 90)
+                            };
+
+                            ui.label(
+                                egui::RichText::new(format!("残り時間: {:.1}秒", rem_secs))
+                                    .color(color)
+                                    .strong(),
+                            );
+                            ui.label(format!(
+                                "　|　クリア: {}問",
+                                session.current_question_index()
+                            ));
+                        }
+                    }
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
-                            egui::RichText::new("[Esc] 中断　[Tab / F5] リトライ")
+                            egui::RichText::new("[Esc] 中断　[Tab] リトライ")
                                 .color(egui::Color32::from_gray(120))
                                 .size(14.0),
                         );
@@ -565,15 +719,11 @@ impl TypingGameApp {
                 ui.add_space(20.0);
                 ui.label(format!("Status: {}", self.status_message));
                 ui.label(format!("Game Status: {:?}", session.status));
-                if let Some(remaining) = session.remaining_time() {
-                    ui.label(format!("Remaining: {:.1}s", remaining.as_secs_f64()));
-                }
             }
         }
     }
 
     fn ui_result(&mut self, ui: &mut egui::Ui) {
-        // Vim移動 (j/k) & 決定 (l/Enter/Space) & 戻る (h/q/Esc)
         if ui.input(|i| i.key_pressed(egui::Key::J) || i.key_pressed(egui::Key::ArrowDown)) {
             self.result_cursor = (self.result_cursor + 1).min(1);
         }
@@ -607,18 +757,39 @@ impl TypingGameApp {
             ui.vertical_centered(|ui| {
                 ui.add_space(30.0);
                 ui.heading("結果");
-                ui.add_space(20.0);
+                ui.add_space(15.0);
 
-                ui.label(format!("難易度: {}", self.selected_difficulty.label()));
+                ui.label(format!(
+                    "モード: {}  /  難易度: {}",
+                    self.selected_mode.label(),
+                    self.selected_difficulty.label()
+                ));
+                ui.add_space(10.0);
+
+                if self.selected_mode == PlayMode::TimeAttack {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "クリア問題数: {}問",
+                            result.questions_completed
+                        ))
+                        .color(egui::Color32::from_rgb(255, 220, 90))
+                        .size(30.0),
+                    );
+                }
+
+                ui.label(format!(
+                    "正確に入力した文字数: {}文字",
+                    result.total_correct
+                ));
                 ui.label(format!("ミスタイプ数: {}回", result.total_incorrect));
                 ui.label(format!("正確性: {:.1}%", result.accuracy * 100.0));
-                ui.label(format!("タイプ数/分: {:.1}", result.average_kpm));
+                ui.label(format!("タイプ数/分 (KPM): {:.1}", result.average_kpm));
                 ui.label(format!(
-                    "合計時間: {:.1}秒",
+                    "プレイ時間: {:.1}秒",
                     result.total_time.as_secs_f64()
                 ));
 
-                ui.add_space(30.0);
+                ui.add_space(25.0);
                 let btn_size = egui::vec2(200.0, 46.0);
 
                 let is_retry_selected = self.result_cursor == 0;
@@ -664,6 +835,7 @@ impl eframe::App for TypingGameApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         match self.screen {
             Screen::Title => self.ui_title(ui),
+            Screen::ModeSelect => self.ui_mode_select(ui),
             Screen::DifficultySelect => self.ui_difficulty_select(ui),
             Screen::Ready => self.ui_ready(ui),
             Screen::Countdown => self.ui_countdown(ui),
