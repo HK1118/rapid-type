@@ -1,9 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod app;
+mod render;
+
 use eframe::egui;
-use eframe::egui::text::LayoutJob;
-use std::time::{Duration, Instant};
-use typing_engine::{EngineInputResult, TypingEngine};
+use game::{Difficulty, GameMode, Question, Session};
+use rand::seq::SliceRandom;
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions::default();
@@ -12,6 +14,7 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(|cc| {
             setup_custom_fonts(&cc.egui_ctx);
+            egui_extras::install_image_loaders(&cc.egui_ctx);
             Ok(Box::new(TypingGameApp::new()))
         }),
     )
@@ -59,88 +62,197 @@ fn setup_custom_fonts(ctx: &egui::Context) {
     ctx.set_global_style(style);
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Screen {
+    Title,
+    DifficultySelect,
+    Playing,
+    Result,
+}
+
 struct TypingGameApp {
-    problems: Vec<&'static str>,
-    current_problem_idx: usize,
-    engine: TypingEngine,
-    typed_guide_input: String,
+    screen: Screen,
+    session: Option<Session>,
+    selected_difficulty: Difficulty,
     status_message: String,
-    last_new_duration: Duration,
-    last_input_duration: Duration,
 }
 
 impl TypingGameApp {
     fn new() -> Self {
-        let problems = vec![
-            "かんかんにおこる",
-            "じゅげむじゅげむごこうのすりきれかいじゃりすいぎょのすいぎょうまつうんらいまつふうらいまつくうねるところにすむところやぶらこうじのぶらこうじぱいぽぱいぽぱいぽのしゅーりんがんしゅーりんがんのぐーりんだいぐーりんだいのぽんぽこぴーのぽんぽこなーのちょうきゅうめいのちょうすけ",
-            "らーめん",
-            "きょう",
-            "がっこう",
-            "にとをおうものいっとをもえず",
-            "きゅうきゅうしゃ",
-            "はっしゃ",
-        ];
-        let start = Instant::now();
-        let engine = TypingEngine::new(problems[0]).expect("initial problem must be valid");
-        let last_new_duration = start.elapsed();
-
         Self {
-            problems,
-            current_problem_idx: 0,
-            engine,
-            typed_guide_input: String::new(),
-            status_message: "Type to start".to_string(),
-            last_new_duration,
-            last_input_duration: Duration::ZERO,
+            screen: Screen::Title,
+            session: None,
+            selected_difficulty: Difficulty::default(),
+            status_message: String::new(),
         }
     }
 
-    fn current_problem(&self) -> &str {
-        self.problems[self.current_problem_idx]
-    }
+    fn start_game(&mut self) {
+        let mut rng = rand::rng();
+        let mut all_problems = self.selected_difficulty.pool();
+        all_problems.shuffle(&mut rng);
+        let problems: Vec<Question> = all_problems.into_iter().take(10).collect();
 
-    fn reset_current_problem(&mut self) {
-        let current = self.current_problem();
-        let start = Instant::now();
-        self.engine = TypingEngine::new(current).expect("problem must be valid");
-        self.last_new_duration = start.elapsed();
-        self.typed_guide_input.clear();
-    }
+        let mode = GameMode::Normal {
+            questions: problems,
+        };
+        let mut session = Session::new(mode);
+        session.start();
 
-    fn advance_problem(&mut self) {
-        self.current_problem_idx = (self.current_problem_idx + 1) % self.problems.len();
-        self.reset_current_problem();
+        self.session = Some(session);
+        self.screen = Screen::Playing;
+        self.status_message = "Type to start".to_string();
     }
 
     fn handle_char_input(&mut self, c: char) {
-        let input = c.to_ascii_lowercase();
-        let start = Instant::now();
-        let result = self.engine.input(input);
-        self.last_input_duration = start.elapsed();
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        if session.is_finished() {
+            return;
+        }
+
+        let result = session.submit_input(c);
         match result {
-            EngineInputResult::Accepted => {
-                self.typed_guide_input.push(input);
-                self.status_message = format!("Accepted: {input}");
+            game::InputResult::Accepted { progress } => {
+                self.status_message = format!(
+                    "Accepted: {} ({}/{})",
+                    c.to_ascii_lowercase(),
+                    progress.completed_chars,
+                    progress.total_chars
+                );
             }
-            EngineInputResult::Rejected => {
-                self.status_message = format!("Rejected: {input}");
+            game::InputResult::Rejected { expected } => {
+                self.status_message = format!(
+                    "Rejected: {} (expected: {})",
+                    c.to_ascii_lowercase(),
+                    expected
+                );
             }
-            EngineInputResult::Completed => {
-                self.typed_guide_input.push(input);
-                self.advance_problem();
-                self.status_message = "Completed! Next problem loaded.".to_string();
+            game::InputResult::Completed { stats } => {
+                self.status_message = format!(
+                    "Completed! Accuracy: {:.1}%, KPM: {:.1}",
+                    stats.accuracy * 100.0,
+                    stats.kpm
+                );
             }
-            EngineInputResult::AlreadyCompleted => {
-                self.status_message = "Already completed. Moving to next problem.".to_string();
-                self.advance_problem();
+            game::InputResult::AlreadyCompleted => {
+                self.status_message = "Already completed".to_string();
+            }
+            game::InputResult::TimeUp => {
+                self.status_message = "Time up!".to_string();
             }
         }
-    }
-}
 
-impl eframe::App for TypingGameApp {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        if session.is_finished() {
+            self.screen = Screen::Result;
+        }
+    }
+
+    fn ui_title(&mut self, ui: &mut egui::Ui) {
+        ui.vertical_centered(|ui| {
+            // --- 1. コンテンツ全体の高さを取得して上部余白を計算 ---
+            let content_id = ui.id().with("title_content");
+            let prev_height: f32 = ui
+                .ctx()
+                .data_mut(|d| d.get_temp(content_id))
+                .unwrap_or(360.0);
+
+            let available_height = ui.available_height();
+            // 0.45〜0.5 を掛けることで上下中央（少し上寄りの心地よい位置）にする
+            let top_space = ((available_height - prev_height) * 0.45).max(0.0);
+            ui.add_space(top_space);
+
+            // --- 2. タイトル画面のコンテンツ ---
+            let response = ui.scope(|ui| {
+                // 画像
+                ui.add(
+                    egui::Image::new(egui::include_image!("../assets/images/logo.png"))
+                        .max_width(500.0),
+                );
+                ui.add_space(15.0);
+
+                ui.label("タイピング練習");
+                ui.add_space(30.0);
+
+                if ui
+                    .add_sized([220.0, 50.0], egui::Button::new("開始"))
+                    .clicked()
+                {
+                    self.screen = Screen::DifficultySelect;
+                }
+                ui.add_space(10.0);
+
+                if ui
+                    .add_sized([220.0, 50.0], egui::Button::new("終了"))
+                    .clicked()
+                {
+                    std::process::exit(0);
+                }
+            });
+
+            // --- 3. 今回描画されたコンテンツの高さを保存（次フレームで使用） ---
+            let actual_height = response.response.rect.height();
+            ui.ctx()
+                .data_mut(|d| d.insert_temp(content_id, actual_height));
+        });
+    }
+
+    fn ui_difficulty_select(&mut self, ui: &mut egui::Ui) {
+        ui.vertical_centered(|ui| {
+            ui.add_space(30.0);
+            ui.heading("難易度を選択");
+            ui.add_space(20.0);
+
+            ui.vertical_centered(|ui| {
+                let is_easy = self.selected_difficulty == Difficulty::Easy;
+                let is_normal = self.selected_difficulty == Difficulty::Normal;
+                let is_hard = self.selected_difficulty == Difficulty::Hard;
+
+                let btn_size = egui::vec2(220.0, 50.0);
+
+                if ui
+                    .add_sized(btn_size, egui::Button::selectable(is_easy, "イージー"))
+                    .clicked()
+                {
+                    self.selected_difficulty = Difficulty::Easy;
+                }
+
+                if ui
+                    .add_sized(btn_size, egui::Button::selectable(is_normal, "ノーマル"))
+                    .clicked()
+                {
+                    self.selected_difficulty = Difficulty::Normal;
+                }
+
+                if ui
+                    .add_sized(btn_size, egui::Button::selectable(is_hard, "ハード"))
+                    .clicked()
+                {
+                    self.selected_difficulty = Difficulty::Hard;
+                }
+            });
+
+            ui.add_space(20.0);
+
+            if ui
+                .add_sized([220.0, 50.0], egui::Button::new("ゲームを開始"))
+                .clicked()
+            {
+                self.start_game();
+            }
+
+            ui.add_space(10.0);
+            if ui
+                .add_sized([220.0, 50.0], egui::Button::new("タイトルに戻る"))
+                .clicked()
+            {
+                self.screen = Screen::Title;
+            }
+        });
+    }
+
+    fn ui_playing(&mut self, ui: &mut egui::Ui) {
         ui.ctx().input(|i| {
             for event in &i.events {
                 if let egui::Event::Text(text) = event {
@@ -154,217 +266,112 @@ impl eframe::App for TypingGameApp {
             }
         });
 
-        ui.label(format!(
-            "Problem ({}/{})",
-            self.current_problem_idx + 1,
-            self.problems.len(),
-        ));
-        let problem_anchor_ratio = 0.35;
-        let (done, current, remaining) = anchored_progress_segments_by_width(
-            ui.ctx(),
-            self.current_problem(),
-            self.engine.completed_char_count(),
-            ui.available_width(),
-            problem_anchor_ratio,
-            egui::FontId::new(56.0, egui::FontFamily::Proportional),
-        );
-        ui.add(
-            egui::Label::new(colored_progress_job(
-                &done, &current, &remaining, 56.0, true,
-            ))
-            .extend(),
-        );
+        if let Some(session) = self.session.as_ref() {
+            if let Some(question) = session.current_question() {
+                ui.label(format!(
+                    "問題 ({}/{}) - {}",
+                    session.current_question_index() + 1,
+                    session.total_questions(),
+                    self.selected_difficulty.label()
+                ));
 
-        ui.label("Guide");
-        let full_guide = format!("{}{}", self.typed_guide_input, self.engine.guide());
-        let typed_count = self.typed_guide_input.chars().count();
-        let (guide_done, guide_current, guide_remaining) = anchored_progress_segments_by_width(
-            ui.ctx(),
-            &full_guide,
-            typed_count,
-            ui.available_width(),
-            problem_anchor_ratio,
-            egui::FontId::new(44.0, egui::FontFamily::Monospace),
-        );
-        ui.add(
-            egui::Label::new(colored_progress_job(
-                &guide_done,
-                &guide_current,
-                &guide_remaining,
-                44.0,
-                false,
-            ))
-            .extend(),
-        );
+                let problem_anchor_ratio = 0.35;
+                if let Some(progress) = session.current_progress() {
+                    let (done, current, remaining) = render::anchored_progress_segments_by_width(
+                        ui.ctx(),
+                        &question.reading,
+                        progress.completed_chars,
+                        ui.available_width(),
+                        problem_anchor_ratio,
+                        egui::FontId::new(56.0, egui::FontFamily::Proportional),
+                    );
+                    ui.add(
+                        egui::Label::new(render::colored_progress_job(
+                            &done, &current, &remaining, 56.0, true,
+                        ))
+                        .extend(),
+                    );
 
-        if cfg!(debug_assertions) {
-            ui.label(format!(
-                "Progress: {} / {}",
-                self.engine.completed_char_count(),
-                self.current_problem().chars().count()
-            ));
-            ui.label(format!("Completed: {}", self.engine.completed_reading()));
-            ui.label(format!(
-                "Furthest: {}",
-                self.engine.furthest_completed_reading()
-            ));
-            ui.separator();
-            ui.label(format!("Status: {}", self.status_message));
-            ui.label(format!(
-                "Debug timings: new={} / input={}",
-                format_duration(self.last_new_duration),
-                format_duration(self.last_input_duration)
-            ));
-            let problem_anchor_idx = self
-                .engine
-                .completed_char_count()
-                .min(self.current_problem().chars().count().saturating_sub(1));
-            let guide_anchor_idx = typed_count.min(full_guide.chars().count().saturating_sub(1));
-            ui.label(format!(
-                "Debug anchor idx: problem={} / guide={} (target {:.0}%)",
-                problem_anchor_idx,
-                guide_anchor_idx,
-                problem_anchor_ratio * 100.0
-            ));
-            ui.label("Type keys while this window is focused.");
+                    ui.label("ローマ字ガイド");
+                    let full_guide = format!("{}{}", progress.typed_romaji, progress.guide);
+                    let typed_count = progress.typed_romaji_count;
+                    let (guide_done, guide_current, guide_remaining) =
+                        render::anchored_progress_segments_by_width(
+                            ui.ctx(),
+                            &full_guide,
+                            typed_count,
+                            ui.available_width(),
+                            problem_anchor_ratio,
+                            egui::FontId::new(44.0, egui::FontFamily::Monospace),
+                        );
+                    ui.add(
+                        egui::Label::new(render::colored_progress_job(
+                            &guide_done,
+                            &guide_current,
+                            &guide_remaining,
+                            44.0,
+                            false,
+                        ))
+                        .extend(),
+                    );
+                }
+            }
 
-            if ui.button("Skip to next problem").clicked() {
-                self.advance_problem();
-                self.status_message = "Skipped to next problem.".to_string();
+            if cfg!(debug_assertions) {
+                ui.label(format!("Status: {}", self.status_message));
+                ui.label(format!("Game Status: {:?}", session.status));
+                if let Some(remaining) = session.remaining_time() {
+                    ui.label(format!("Remaining: {:.1}s", remaining.as_secs_f64()));
+                }
             }
         }
     }
-}
 
-fn anchored_progress_segments_by_width(
-    ctx: &egui::Context,
-    text: &str,
-    completed_chars: usize,
-    max_width: f32,
-    anchor_ratio: f32,
-    font_id: egui::FontId,
-) -> (String, String, String) {
-    let chars: Vec<char> = text.chars().collect();
-    let total_chars = chars.len();
-    if total_chars == 0 {
-        return (String::new(), String::new(), String::new());
-    }
+    fn ui_result(&mut self, ui: &mut egui::Ui) {
+        if let Some(session) = self.session.as_ref()
+            && let Some(result) = session.game_result()
+        {
+            ui.vertical_centered(|ui| {
+                ui.add_space(20.0);
+                ui.heading("結果");
+                ui.add_space(20.0);
 
-    let completed = completed_chars.min(total_chars);
-    let current_idx = completed.min(total_chars.saturating_sub(1));
+                ui.label(format!("難易度: {}", self.selected_difficulty.label()));
+                ui.label(format!("ミスタイプ数: {}回", result.total_incorrect));
+                ui.label(format!("正確性: {:.1}%", result.accuracy * 100.0));
+                ui.label(format!("タイプ数/分: {:.1}", result.average_kpm));
+                ui.label(format!(
+                    "合計時間: {:.1}秒",
+                    result.total_time.as_secs_f64()
+                ));
 
-    let galley = ctx.fonts_mut(|fonts| {
-        fonts.layout_no_wrap(text.to_string(), font_id.clone(), egui::Color32::WHITE)
-    });
-
-    let mut prefix_widths = Vec::with_capacity(total_chars + 1);
-    prefix_widths.push(0.0f32);
-
-    if let Some(row) = galley.rows.first() {
-        for glyph in &row.glyphs {
-            prefix_widths.push(glyph.max_x());
+                ui.add_space(30.0);
+                if ui
+                    .add_sized([220.0, 50.0], egui::Button::new("もう一度遊ぶ"))
+                    .clicked()
+                {
+                    self.start_game();
+                }
+                ui.add_space(10.0);
+                if ui
+                    .add_sized([220.0, 50.0], egui::Button::new("タイトルに戻る"))
+                    .clicked()
+                {
+                    self.screen = Screen::Title;
+                    self.session = None;
+                }
+            });
         }
     }
-
-    while prefix_widths.len() <= total_chars {
-        let last = prefix_widths.last().copied().unwrap_or(0.0);
-        prefix_widths.push(last + font_id.size * 0.5);
-    }
-
-    let clamped_width = max_width.max(font_id.size * 4.0);
-    let target_left = (prefix_widths[current_idx] - clamped_width * anchor_ratio).max(0.0);
-    let mut start_char = prefix_widths
-        .partition_point(|&w| w <= target_left)
-        .saturating_sub(1);
-    start_char = start_char.min(current_idx);
-
-    let right_limit = prefix_widths[start_char] + clamped_width;
-    let mut end_char = prefix_widths.partition_point(|&w| w <= right_limit);
-    end_char = end_char.clamp(start_char + 1, total_chars);
-    if end_char <= current_idx {
-        end_char = current_idx + 1;
-    }
-
-    if completed >= total_chars {
-        let done: String = chars[start_char..end_char].iter().collect();
-        return (done, String::new(), String::new());
-    }
-
-    let visible_completed = completed
-        .saturating_sub(start_char)
-        .min(end_char - start_char);
-    let done_end = start_char + visible_completed;
-    let done: String = chars[start_char..done_end].iter().collect();
-
-    if done_end < end_char {
-        let current = chars[done_end].to_string();
-        let remaining: String = chars[(done_end + 1)..end_char].iter().collect();
-        (done, current, remaining)
-    } else {
-        (done, String::new(), String::new())
-    }
 }
 
-fn format_duration(duration: Duration) -> String {
-    let micros = duration.as_micros();
-    if micros >= 1_000 {
-        format!("{:.3} ms", micros as f64 / 1_000.0)
-    } else {
-        format!("{micros} µs")
+impl eframe::App for TypingGameApp {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        match self.screen {
+            Screen::Title => self.ui_title(ui),
+            Screen::DifficultySelect => self.ui_difficulty_select(ui),
+            Screen::Playing => self.ui_playing(ui),
+            Screen::Result => self.ui_result(ui),
+        }
     }
-}
-
-fn colored_progress_job(
-    done: &str,
-    current: &str,
-    remaining: &str,
-    size: f32,
-    is_japanese: bool,
-) -> LayoutJob {
-    let mut job = LayoutJob::default();
-
-    let done_color = egui::Color32::from_gray(80);
-    let current_color = egui::Color32::from_rgb(255, 220, 90);
-    let remaining_color = egui::Color32::from_gray(180);
-    let family = if is_japanese {
-        egui::FontFamily::Proportional
-    } else {
-        egui::FontFamily::Monospace
-    };
-
-    if !done.is_empty() {
-        job.append(
-            done,
-            0.0,
-            egui::TextFormat {
-                font_id: egui::FontId::new(size, family.clone()),
-                color: done_color,
-                ..Default::default()
-            },
-        );
-    }
-    if !current.is_empty() {
-        job.append(
-            current,
-            0.0,
-            egui::TextFormat {
-                font_id: egui::FontId::new(size, family.clone()),
-                color: current_color,
-                ..Default::default()
-            },
-        );
-    }
-    if !remaining.is_empty() {
-        job.append(
-            remaining,
-            0.0,
-            egui::TextFormat {
-                font_id: egui::FontId::new(size, family),
-                color: remaining_color,
-                ..Default::default()
-            },
-        );
-    }
-
-    job
 }
