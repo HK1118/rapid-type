@@ -204,11 +204,11 @@ impl TypingGameApp {
             if self.title_cursor == 0 {
                 self.screen = Screen::ModeSelect;
             } else {
-                std::process::exit(0);
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
             }
         }
         if ui.input(|i| i.key_pressed(egui::Key::Q) || i.key_pressed(egui::Key::Escape)) {
-            std::process::exit(0);
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
         }
 
         ui.vertical_centered(|ui| {
@@ -254,7 +254,7 @@ impl TypingGameApp {
                     .clicked()
                 {
                     self.title_cursor = 1;
-                    std::process::exit(0);
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                 }
 
                 ui.add_space(25.0);
