@@ -4,13 +4,15 @@ use serde::{Deserialize, Serialize};
 pub struct RubySegment {
     pub display: String,
     pub reading: String,
+    pub is_ruby: bool,
 }
 
 impl RubySegment {
-    pub fn new(display: impl Into<String>, reading: impl Into<String>) -> Self {
+    pub fn new(display: impl Into<String>, reading: impl Into<String>, is_ruby: bool) -> Self {
         Self {
             display: display.into(),
             reading: reading.into(),
+            is_ruby,
         }
     }
 }
@@ -55,7 +57,7 @@ pub fn parse_ruby(input: &str) -> Result<Vec<RubySegment>, RubyParseError> {
                 validate_plain_text(&plain_buf, input)?;
                 // 平文に含まれるカタカナを自動でひらがな読みに変換してセグメント化
                 let reading = to_hiragana_string(&plain_buf);
-                segments.push(RubySegment::new(plain_buf.clone(), reading));
+                segments.push(RubySegment::new(plain_buf.clone(), reading, false));
                 plain_buf.clear();
             }
 
@@ -85,7 +87,7 @@ pub fn parse_ruby(input: &str) -> Result<Vec<RubySegment>, RubyParseError> {
             let reading_hira = to_hiragana_string(reading);
             validate_reading_text(&reading_hira, input)?;
 
-            segments.push(RubySegment::new(display, reading_hira));
+            segments.push(RubySegment::new(display, reading_hira, true));
         } else {
             plain_buf.push(c);
         }
@@ -94,7 +96,7 @@ pub fn parse_ruby(input: &str) -> Result<Vec<RubySegment>, RubyParseError> {
     if !plain_buf.is_empty() {
         validate_plain_text(&plain_buf, input)?;
         let reading = to_hiragana_string(&plain_buf);
-        segments.push(RubySegment::new(plain_buf.clone(), reading));
+        segments.push(RubySegment::new(plain_buf.clone(), reading, false));
     }
 
     Ok(segments)
@@ -151,8 +153,8 @@ pub fn calculate_display_progress(segments: &[RubySegment], reading_completed: u
             rem_reading -= seg_reading_len;
             display_completed += seg_display_len;
         } else {
-            // 文字数が1対1で一致する場合（ひらがな、カタカナ、英数字、記号など）
-            if seg_display_len == seg_reading_len {
+            // ひらがな、カタカナの場合のみ、1文字打つごとに表示側も1文字進める
+            if !seg.is_ruby && seg_display_len == seg_reading_len {
                 // 1文字打つごとにカタカナ/ひらがなも1文字リアルタイムに進める
                 display_completed += rem_reading;
             }
@@ -176,12 +178,12 @@ mod tests {
         assert_eq!(
             segments,
             vec![
-                RubySegment::new("青", "あお"),
-                RubySegment::new("空", "ぞら"),
-                RubySegment::new("を", "を"),
-                RubySegment::new("見", "み"),
-                RubySegment::new("上", "あ"),
-                RubySegment::new("げる", "げる"),
+                RubySegment::new("青", "あお", true),
+                RubySegment::new("空", "ぞら", true),
+                RubySegment::new("を", "を", false),
+                RubySegment::new("見", "み", true),
+                RubySegment::new("上", "あ", true),
+                RubySegment::new("げる", "げる", false),
             ]
         );
     }
@@ -190,7 +192,7 @@ mod tests {
     fn test_parse_plain_hiragana_and_katakana() {
         let input = "おにぎりとちょこれーと";
         let segments = parse_ruby(input).unwrap();
-        assert_eq!(segments, vec![RubySegment::new(input, input)]);
+        assert_eq!(segments, vec![RubySegment::new(input, input, false)]);
     }
 
     #[test]
@@ -201,10 +203,10 @@ mod tests {
         assert_eq!(
             segments,
             vec![
-                RubySegment::new("今日", "きょう"),
-                RubySegment::new("は", "は"),
-                RubySegment::new("晴", "は"),
-                RubySegment::new("れ", "れ"),
+                RubySegment::new("今日", "きょう", true),
+                RubySegment::new("は", "は", false),
+                RubySegment::new("晴", "は", true),
+                RubySegment::new("れ", "れ", false),
             ]
         );
     }
@@ -263,6 +265,34 @@ mod tests {
     }
 
     #[test]
+    fn test_jukujikun_progress_does_not_advance_partially() {
+        // 漢字2文字・読み2文字の熟字訓
+        let segments = parse_ruby("[風邪|かぜ][薬|ぐすり]").unwrap();
+
+        // 0文字入力 ("") -> 0文字確定
+        assert_eq!(calculate_display_progress(&segments, 0), 0);
+        // 1文字入力 ("か") -> 「風邪」は保留されるので 0文字確定
+        assert_eq!(calculate_display_progress(&segments, 1), 0);
+        // 2文字入力 ("かぜ") -> 「風邪」が確定して 2文字確定
+        assert_eq!(calculate_display_progress(&segments, 2), 2);
+        // 3文字入力 ("かぜぐ") -> 「薬」は保留されるので 2文字確定
+        assert_eq!(calculate_display_progress(&segments, 3), 2);
+        // 5文字入力 ("かぜぐすり") -> 全完了で 3文字確定 ("風邪薬")
+        assert_eq!(calculate_display_progress(&segments, 5), 3);
+    }
+
+    #[test]
+    fn test_plain_katakana_advances_one_by_one() {
+        // 平文のカタカナは1文字ずつ進む
+        let segments = parse_ruby("アイス").unwrap();
+
+        assert_eq!(calculate_display_progress(&segments, 0), 0);
+        assert_eq!(calculate_display_progress(&segments, 1), 1); // "ア"
+        assert_eq!(calculate_display_progress(&segments, 2), 2); // "アイ"
+        assert_eq!(calculate_display_progress(&segments, 3), 3); // "アイス"
+    }
+
+    #[test]
     fn test_okurigana_multiple_chars_progress() {
         // 送り仮名「げる」が2文字ある場合
         let segments = parse_ruby("[見|み][上|あ]げる").unwrap();
@@ -294,8 +324,8 @@ mod tests {
         assert_eq!(
             segments,
             vec![
-                RubySegment::new("秋", "あき"),
-                RubySegment::new("のチョコレートケーキ", "のちょこれーとけーき"),
+                RubySegment::new("秋", "あき", true),
+                RubySegment::new("のチョコレートケーキ", "のちょこれーとけーき", false),
             ]
         );
     }
