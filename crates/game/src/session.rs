@@ -241,12 +241,12 @@ impl Session {
         self.stats = Stats::new();
 
         // タイムアタックで問題が尽きた場合はプールから補充する
-        if self.current_question_idx >= self.questions.len() {
-            if let GameMode::TimeAttack { pool, .. } = &self.mode {
-                let mut more = pool.clone();
-                more.shuffle(&mut rand::rng());
-                self.questions.extend(more);
-            }
+        if self.current_question_idx >= self.questions.len()
+            && let GameMode::TimeAttack { pool, .. } = &self.mode
+        {
+            let mut more = pool.clone();
+            more.shuffle(&mut rand::rng());
+            self.questions.extend(more);
         }
 
         if self.current_question_idx >= self.questions.len() || self.is_time_up() {
