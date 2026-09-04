@@ -38,7 +38,12 @@ fn main() {
         show_box("RapidType Crash", &msg);
     }));
 
-    let options = eframe::NativeOptions::default();
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([1100.0, 750.0])
+            .with_min_inner_size([800.0, 550.0]),
+        ..Default::default()
+    };
 
     // 2. 実行と初期化エラーの検知
     let result = eframe::run_native(
@@ -138,6 +143,16 @@ struct TypingGameApp {
     mode_cursor: usize,   // 0: ノーマル, 1: タイムアタック
     result_cursor: usize, // 0: もう一度遊ぶ, 1: タイトルに戻る
     countdown_start: Option<Instant>,
+
+    // 画面スケーリングの安定化用
+    last_window_height: f32,
+
+    // 低スペックPC向け文字幅キャッシュ
+    cached_question_id: Option<String>,
+    cached_display_widths: Vec<f32>,
+    cached_reading_widths: Vec<f32>,
+
+    miss_flash_time: Option<Instant>,
 }
 
 impl TypingGameApp {
@@ -152,6 +167,11 @@ impl TypingGameApp {
             mode_cursor: 0,
             result_cursor: 0,
             countdown_start: None,
+            last_window_height: 0.0,
+            cached_question_id: None,
+            cached_display_widths: Vec::new(),
+            cached_reading_widths: Vec::new(),
+            miss_flash_time: None,
         }
     }
 
@@ -177,6 +197,7 @@ impl TypingGameApp {
         session.start();
 
         self.session = Some(session);
+        self.cached_question_id = None; // キャッシュクリア
         self.screen = Screen::Playing;
         self.status_message = "Type to start".to_string();
     }
@@ -194,17 +215,12 @@ impl TypingGameApp {
             game::InputResult::Accepted { progress } => {
                 self.status_message = format!(
                     "Accepted: {} ({}/{})",
-                    c.to_ascii_lowercase(),
-                    progress.completed_chars,
-                    progress.total_chars
+                    c, progress.completed_chars, progress.total_chars
                 );
             }
             game::InputResult::Rejected { expected } => {
-                self.status_message = format!(
-                    "Rejected: {} (expected: {})",
-                    c.to_ascii_lowercase(),
-                    expected
-                );
+                self.miss_flash_time = Some(Instant::now());
+                self.status_message = format!("Rejected: {} (expected: {})", c, expected);
             }
             game::InputResult::Completed { stats } => {
                 self.status_message = format!(
@@ -298,13 +314,13 @@ impl TypingGameApp {
                 ui.add_space(25.0);
                 ui.label(
                     egui::RichText::new("[↑ / ↓] 移動　　[Space / Enter] 決定　　[q / Esc] 終了")
-                        .color(egui::Color32::from_gray(130))
+                        .color(egui::Color32::from_gray(165))
                         .size(15.0),
                 );
                 ui.add_space(4.0);
                 ui.label(
                     egui::RichText::new("vim風操作も可能")
-                        .color(egui::Color32::from_gray(130))
+                        .color(egui::Color32::from_gray(165))
                         .size(15.0),
                 );
             });
@@ -315,7 +331,6 @@ impl TypingGameApp {
         });
     }
 
-    /// モード選択画面 (ノーマル / タイムアタック)
     fn ui_mode_select(&mut self, ui: &mut egui::Ui) {
         if ui.input(|i| i.key_pressed(egui::Key::J) || i.key_pressed(egui::Key::ArrowDown)) {
             self.mode_cursor = (self.mode_cursor + 1).min(1);
@@ -394,7 +409,7 @@ impl TypingGameApp {
             ui.add_space(25.0);
             ui.label(
                 egui::RichText::new("[↑ / ↓] 移動　　[Space / Enter] 決定　　[q / Esc] 戻る")
-                    .color(egui::Color32::from_gray(130))
+                    .color(egui::Color32::from_gray(165))
                     .size(15.0),
             );
         });
@@ -491,7 +506,7 @@ impl TypingGameApp {
             ui.add_space(25.0);
             ui.label(
                 egui::RichText::new("[↑ / ↓] 移動　　[Space / Enter] 決定　　[q / Esc] 戻る")
-                    .color(egui::Color32::from_gray(130))
+                    .color(egui::Color32::from_gray(165))
                     .size(15.0),
             );
         });
@@ -524,7 +539,7 @@ impl TypingGameApp {
                     self.selected_mode.label(),
                     self.selected_difficulty.label()
                 ))
-                .color(egui::Color32::from_gray(180))
+                .color(egui::Color32::from_gray(210))
                 .size(20.0),
             );
             ui.add_space(25.0);
@@ -549,7 +564,7 @@ impl TypingGameApp {
             ui.add_space(35.0);
             ui.label(
                 egui::RichText::new("[q / Esc] 戻る")
-                    .color(egui::Color32::from_gray(130))
+                    .color(egui::Color32::from_gray(165))
                     .size(15.0),
             );
         });
@@ -582,7 +597,7 @@ impl TypingGameApp {
                     self.selected_mode.label(),
                     self.selected_difficulty.label()
                 ))
-                .color(egui::Color32::from_gray(160))
+                .color(egui::Color32::from_gray(200))
                 .size(20.0),
             );
             ui.add_space(30.0);
@@ -625,6 +640,8 @@ impl TypingGameApp {
             }
         }
 
+        // テキスト入力の即時処理
+        let mut text_received = false;
         ui.ctx().input(|i| {
             for event in &i.events {
                 if let egui::Event::Text(text) = event {
@@ -636,14 +653,35 @@ impl TypingGameApp {
                             c = ' ';
                         }
                         self.handle_char_input(c);
+                        text_received = true;
                     }
                 }
             }
         });
 
+        // キー入力があったら即座に描画要求を出してラグを最小化
+        if text_received {
+            ui.ctx().request_repaint();
+        }
+
         if let Some(session) = self.session.as_ref() {
             if let Some(question) = session.current_question() {
-                // ヘッダー情報（問題番号 or タイマー）
+                // 問題が変わった時だけ文字幅を再計算（毎フレームのCPU負荷をゼロにする）
+                if self.cached_question_id.as_deref() != Some(&question.id) {
+                    self.cached_display_widths = render::compute_prefix_widths(
+                        ui.ctx(),
+                        &question.display,
+                        egui::FontId::new(48.0, egui::FontFamily::Proportional),
+                    );
+                    self.cached_reading_widths = render::compute_prefix_widths(
+                        ui.ctx(),
+                        &question.reading,
+                        egui::FontId::new(26.0, egui::FontFamily::Proportional),
+                    );
+                    self.cached_question_id = Some(question.id.clone());
+                }
+
+                // ヘッダー情報
                 ui.horizontal(|ui| {
                     match &session.mode {
                         GameMode::Normal { .. } => {
@@ -678,7 +716,7 @@ impl TypingGameApp {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
                             egui::RichText::new("[Esc] 中断　[Tab] リトライ")
-                                .color(egui::Color32::from_gray(120))
+                                .color(egui::Color32::from_gray(160))
                                 .size(14.0),
                         );
                     });
@@ -688,17 +726,17 @@ impl TypingGameApp {
 
                 let anchor_ratio = 0.35;
                 if let Some(progress) = session.current_progress() {
-                    // 1段目: 漢字
+                    // 1段目: 漢字（キャッシュを利用）
                     let display_completed =
                         question.display_completed_chars(progress.completed_chars);
                     let (disp_done, disp_curr, disp_rem) =
-                        render::anchored_progress_segments_by_width(
-                            ui.ctx(),
+                        render::anchored_progress_segments_cached(
                             &question.display,
                             display_completed,
                             ui.available_width(),
                             anchor_ratio,
-                            egui::FontId::new(48.0, egui::FontFamily::Proportional),
+                            48.0,
+                            &self.cached_display_widths,
                         );
                     ui.add(
                         egui::Label::new(render::colored_progress_job(
@@ -709,15 +747,15 @@ impl TypingGameApp {
 
                     ui.add_space(4.0);
 
-                    // 2段目: ふりがな
+                    // 2段目: ふりがな（キャッシュを利用）
                     let (read_done, read_curr, read_rem) =
-                        render::anchored_progress_segments_by_width(
-                            ui.ctx(),
+                        render::anchored_progress_segments_cached(
                             &question.reading,
                             progress.completed_chars,
                             ui.available_width(),
                             anchor_ratio,
-                            egui::FontId::new(26.0, egui::FontFamily::Proportional),
+                            26.0,
+                            &self.cached_reading_widths,
                         );
                     ui.add(
                         egui::Label::new(render::colored_progress_job(
@@ -728,17 +766,23 @@ impl TypingGameApp {
 
                     ui.add_space(4.0);
 
-                    // 3段目: ローマ字
+                    // 3段目: ローマ字（等幅フォント用の超高速幅計算を利用）
                     let full_guide = format!("{}{}", progress.typed_romaji, progress.guide);
                     let typed_count = progress.typed_romaji_count;
+                    let guide_widths = render::compute_monospace_prefix_widths(
+                        ui.ctx(),
+                        &full_guide,
+                        egui::FontId::new(36.0, egui::FontFamily::Monospace),
+                    );
+
                     let (guide_done, guide_current, guide_remaining) =
-                        render::anchored_progress_segments_by_width(
-                            ui.ctx(),
+                        render::anchored_progress_segments_cached(
                             &full_guide,
                             typed_count,
                             ui.available_width(),
                             anchor_ratio,
-                            egui::FontId::new(36.0, egui::FontFamily::Monospace),
+                            36.0,
+                            &guide_widths,
                         );
                     ui.add(
                         egui::Label::new(render::colored_progress_job(
@@ -757,6 +801,34 @@ impl TypingGameApp {
                 ui.add_space(20.0);
                 ui.label(format!("Status: {}", self.status_message));
                 ui.label(format!("Game Status: {:?}", session.status));
+            }
+
+            if let Some(flash_time) = self.miss_flash_time {
+                let elapsed = flash_time.elapsed().as_secs_f32();
+                let duration = 0.10; // フラッシュの長さ（約130ミリ秒）
+
+                if elapsed < duration {
+                    // 時間経過に合わせてアルファ値を 50 -> 0 に減衰（フェードアウト）
+                    let progress = elapsed / duration;
+                    let alpha = ((1.0 - progress) * 40.0) as u8;
+
+                    // 画面最前面レイヤーに薄い赤を描画
+                    let screen_rect = ui.ctx().viewport_rect();
+                    let painter = ui.ctx().layer_painter(egui::LayerId::new(
+                        egui::Order::Foreground,
+                        egui::Id::new("miss_flash_layer"),
+                    ));
+                    painter.rect_filled(
+                        screen_rect,
+                        0.0,
+                        egui::Color32::from_rgba_unmultiplied(200, 35, 35, alpha),
+                    );
+
+                    // フェードアウトのアニメーションを滑らかに描画するためにフレーム更新を要求
+                    ui.ctx().request_repaint();
+                } else {
+                    self.miss_flash_time = None;
+                }
             }
         }
     }
@@ -792,18 +864,54 @@ impl TypingGameApp {
         if let Some(session) = self.session.as_ref()
             && let Some(result) = session.game_result()
         {
+            let score = calculate_score(&result);
+            let (rank, rank_color, comment) = evaluate_rank(score);
+
             ui.vertical_centered(|ui| {
-                ui.add_space(30.0);
-                ui.heading("結果");
-                ui.add_space(15.0);
+                ui.add_space(20.0);
+                ui.heading("結果発表");
+                ui.add_space(6.0);
 
-                ui.label(format!(
-                    "モード: {}  /  難易度: {}",
-                    self.selected_mode.label(),
-                    self.selected_difficulty.label()
-                ));
-                ui.add_space(10.0);
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{}  /  {}",
+                        self.selected_mode.label(),
+                        self.selected_difficulty.label()
+                    ))
+                    .color(egui::Color32::from_gray(170))
+                    .size(16.0),
+                );
+                ui.add_space(14.0);
 
+                // ★ ランク表示（特大・ランクカラー）
+                ui.label(
+                    egui::RichText::new(format!("ランク: {rank}"))
+                        .color(rank_color)
+                        .size(54.0)
+                        .strong(),
+                );
+
+                // ★ スコア表示
+                ui.label(
+                    egui::RichText::new(format!("スコア: {} 点", format_number(score)))
+                        .color(egui::Color32::from_rgb(255, 230, 100))
+                        .size(30.0)
+                        .strong(),
+                );
+                ui.add_space(4.0);
+
+                // ★ 一言評価コメント
+                ui.label(
+                    egui::RichText::new(comment)
+                        .color(egui::Color32::from_gray(190))
+                        .size(15.0),
+                );
+
+                ui.add_space(12.0);
+                ui.separator();
+                ui.add_space(12.0);
+
+                // 詳細統計
                 if self.selected_mode == PlayMode::TimeAttack {
                     ui.label(
                         egui::RichText::new(format!(
@@ -811,23 +919,22 @@ impl TypingGameApp {
                             result.questions_completed
                         ))
                         .color(egui::Color32::from_rgb(255, 220, 90))
-                        .size(30.0),
+                        .size(20.0),
                     );
                 }
 
-                ui.label(format!(
-                    "正確に入力した文字数: {}文字",
-                    result.total_correct
-                ));
-                ui.label(format!("ミスタイプ数: {}回", result.total_incorrect));
-                ui.label(format!("正確性: {:.1}%", result.accuracy * 100.0));
                 ui.label(format!("タイプ数/分 (KPM): {:.1}", result.average_kpm));
+                ui.label(format!("正確性: {:.1}%", result.accuracy * 100.0));
+                ui.label(format!(
+                    "正解打鍵数: {}文字　/　ミス: {}回",
+                    result.total_correct, result.total_incorrect
+                ));
                 ui.label(format!(
                     "プレイ時間: {:.1}秒",
                     result.total_time.as_secs_f64()
                 ));
 
-                ui.add_space(25.0);
+                ui.add_space(20.0);
                 let btn_size = egui::vec2(200.0, 46.0);
 
                 let is_retry_selected = self.result_cursor == 0;
@@ -856,12 +963,12 @@ impl TypingGameApp {
                     self.session = None;
                 }
 
-                ui.add_space(25.0);
+                ui.add_space(20.0);
                 ui.label(
                     egui::RichText::new(
                         "[↑ / ↓] 移動　　[Space / Enter] 決定　　[q / Esc] タイトルに戻る",
                     )
-                    .color(egui::Color32::from_gray(130))
+                    .color(egui::Color32::from_gray(165))
                     .size(15.0),
                 );
             });
@@ -871,6 +978,18 @@ impl TypingGameApp {
 
 impl eframe::App for TypingGameApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx();
+        let current_zoom = ctx.zoom_factor();
+        let unscaled_height = ctx.viewport_rect().height() * current_zoom;
+
+        // ウィンドウの物理サイズが実際に変化した時だけ set_zoom_factor を呼ぶ
+        // （毎フレーム呼ぶことによるテクスチャ再生成と入力遅延・残像・振動を防止）
+        if (self.last_window_height - unscaled_height).abs() > 1.0 {
+            self.last_window_height = unscaled_height;
+            let target_scale = (unscaled_height / 780.0).clamp(0.8, 2.5);
+            ctx.set_zoom_factor(target_scale);
+        }
+
         match self.screen {
             Screen::Title => self.ui_title(ui),
             Screen::ModeSelect => self.ui_mode_select(ui),
@@ -881,4 +1000,63 @@ impl eframe::App for TypingGameApp {
             Screen::Result => self.ui_result(ui),
         }
     }
+}
+
+/// スコア計算: KPM × (正確率 ^ 3) × 10
+fn calculate_score(result: &game::GameResult) -> u64 {
+    if result.accuracy <= 0.0 || result.average_kpm <= 0.0 {
+        return 0;
+    }
+    let raw = result.average_kpm * result.accuracy.powi(3) * 10.0;
+    raw.round().max(0.0) as u64
+}
+
+/// ランク・表示色・コメントを判定
+fn evaluate_rank(score: u64) -> (&'static str, egui::Color32, &'static str) {
+    match score {
+        s if s >= 4000 => (
+            "SS",
+            egui::Color32::from_rgb(255, 215, 0), // ゴールド
+            "神業レベル！驚異的なタイピング速度です！",
+        ),
+        s if s >= 3200 => (
+            "S",
+            egui::Color32::from_rgb(255, 220, 90), // イエローゴールド
+            "素晴らしい！プロフェッショナル級の腕前！",
+        ),
+        s if s >= 2400 => (
+            "A",
+            egui::Color32::from_rgb(255, 160, 50), // オレンジ
+            "かなり速い！ブラインドタッチも完璧です！",
+        ),
+        s if s >= 1600 => (
+            "B",
+            egui::Color32::from_rgb(100, 220, 130), // グリーン
+            "実用十分！業務や日常で困らないスピード！",
+        ),
+        s if s >= 900 => (
+            "C",
+            egui::Color32::from_rgb(100, 190, 255), // ライトブルー
+            "順調に上達中！ミスを減らすとさらにスコアUP！",
+        ),
+        _ => (
+            "D",
+            egui::Color32::from_gray(180), // グレー
+            "まずは正確に打つことを意識してみましょう！",
+        ),
+    }
+}
+
+/// 数字を3桁カンマ区切りにする (例: 2450 -> "2,450")
+fn format_number(num: u64) -> String {
+    let s = num.to_string();
+    let len = s.len();
+    let mut result = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (len - i).is_multiple_of(3) {
+            result.push(',');
+        }
+        result.push(c);
+    }
+    result
 }

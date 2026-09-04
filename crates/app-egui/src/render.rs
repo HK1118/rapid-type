@@ -1,13 +1,14 @@
 use eframe::egui;
 use eframe::egui::text::LayoutJob;
 
-pub fn anchored_progress_segments_by_width(
-    ctx: &egui::Context,
+/// 事前計算された累積幅配列を用いて、表示範囲（完了・現在・残り）を高速に切り出す
+pub fn anchored_progress_segments_cached(
     text: &str,
     completed_chars: usize,
     max_width: f32,
     anchor_ratio: f32,
-    font_id: egui::FontId,
+    font_size: f32,
+    prefix_widths: &[f32],
 ) -> (String, String, String) {
     let chars: Vec<char> = text.chars().collect();
     let total_chars = chars.len();
@@ -18,26 +19,11 @@ pub fn anchored_progress_segments_by_width(
     let completed = completed_chars.min(total_chars);
     let current_idx = completed.min(total_chars.saturating_sub(1));
 
-    let galley = ctx.fonts_mut(|fonts| {
-        fonts.layout_no_wrap(text.to_string(), font_id.clone(), egui::Color32::WHITE)
-    });
+    let clamped_width = max_width.max(font_size * 4.0);
+    let target_left = (prefix_widths.get(current_idx).copied().unwrap_or(0.0)
+        - clamped_width * anchor_ratio)
+        .max(0.0);
 
-    let mut prefix_widths = Vec::with_capacity(total_chars + 1);
-    prefix_widths.push(0.0f32);
-
-    if let Some(row) = galley.rows.first() {
-        for glyph in &row.glyphs {
-            prefix_widths.push(glyph.max_x());
-        }
-    }
-
-    while prefix_widths.len() <= total_chars {
-        let last = prefix_widths.last().copied().unwrap_or(0.0);
-        prefix_widths.push(last + font_id.size * 0.5);
-    }
-
-    let clamped_width = max_width.max(font_id.size * 4.0);
-    let target_left = (prefix_widths[current_idx] - clamped_width * anchor_ratio).max(0.0);
     let mut start_char = prefix_widths
         .partition_point(|&w| w <= target_left)
         .saturating_sub(1);
@@ -70,6 +56,52 @@ pub fn anchored_progress_segments_by_width(
     }
 }
 
+/// プロポーショナルフォント用：テキストの累積幅リストを計算（問題切替時のみ1度実行）
+pub fn compute_prefix_widths(ctx: &egui::Context, text: &str, font_id: egui::FontId) -> Vec<f32> {
+    let total_chars = text.chars().count();
+    let galley = ctx.fonts_mut(|fonts| {
+        fonts.layout_no_wrap(text.to_string(), font_id.clone(), egui::Color32::WHITE)
+    });
+
+    let mut prefix_widths = Vec::with_capacity(total_chars + 1);
+    prefix_widths.push(0.0f32);
+
+    if let Some(row) = galley.rows.first() {
+        for glyph in &row.glyphs {
+            prefix_widths.push(glyph.max_x());
+        }
+    }
+
+    while prefix_widths.len() <= total_chars {
+        let last = prefix_widths.last().copied().unwrap_or(0.0);
+        prefix_widths.push(last + font_id.size * 0.5);
+    }
+
+    prefix_widths
+}
+
+/// 等幅フォント用：1文字幅から掛け算で累積幅を即座に生成（レイアウト処理なしで超高速）
+pub fn compute_monospace_prefix_widths(
+    ctx: &egui::Context,
+    text: &str,
+    font_id: egui::FontId,
+) -> Vec<f32> {
+    let char_width = ctx.fonts_mut(|fonts| fonts.glyph_width(&font_id, 'm'));
+    let char_width = if char_width > 0.0 {
+        char_width
+    } else {
+        font_id.size * 0.6
+    };
+
+    let total_chars = text.chars().count();
+    let mut prefix_widths = Vec::with_capacity(total_chars + 1);
+    for i in 0..=total_chars {
+        prefix_widths.push(i as f32 * char_width);
+    }
+    prefix_widths
+}
+
+/// 色付けテキストレイアウトを生成（視認性向上トーン）
 pub fn colored_progress_job(
     done: &str,
     current: &str,
@@ -79,9 +111,11 @@ pub fn colored_progress_job(
 ) -> LayoutJob {
     let mut job = LayoutJob::default();
 
-    let done_color = egui::Color32::from_gray(80);
-    let current_color = egui::Color32::from_rgb(255, 220, 90);
-    let remaining_color = egui::Color32::from_gray(180);
+    // 背景と同化しにくいように全体的にトーンアップ
+    let done_color = egui::Color32::from_gray(110);
+    let current_color = egui::Color32::from_rgb(255, 230, 100);
+    let remaining_color = egui::Color32::from_gray(225);
+
     let family = if is_japanese {
         egui::FontFamily::Proportional
     } else {
