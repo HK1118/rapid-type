@@ -8,9 +8,40 @@ use game::{Difficulty, GameMode, Question, Session};
 use rand::seq::SliceRandom;
 use std::time::{Duration, Instant};
 
-fn main() -> eframe::Result<()> {
+fn show_box(title: &str, message: &str) {
+    #[cfg(windows)]
+    unsafe {
+        use std::ffi::CString;
+        unsafe extern "system" {
+            fn MessageBoxA(
+                hwnd: *mut std::ffi::c_void,
+                lpText: *const i8,
+                lpCaption: *const i8,
+                uType: u32,
+            ) -> i32;
+        }
+        let t = CString::new(title).unwrap_or_default();
+        let m = CString::new(message).unwrap_or_default();
+        MessageBoxA(std::ptr::null_mut(), m.as_ptr(), t.as_ptr(), 0x10);
+    }
+    #[cfg(not(windows))]
+    {
+        eprintln!("{}: {}", title, message);
+    }
+}
+
+fn main() {
+    // 1. パニック発生時の検知
+    std::panic::set_hook(Box::new(|info| {
+        let msg = format!("RapidType Panic:\n{}", info);
+        let _ = std::fs::write("crash.log", &msg);
+        show_box("RapidType Crash", &msg);
+    }));
+
     let options = eframe::NativeOptions::default();
-    eframe::run_native(
+
+    // 2. 実行と初期化エラーの検知
+    let result = eframe::run_native(
         "Rapid Type",
         options,
         Box::new(|cc| {
@@ -18,7 +49,14 @@ fn main() -> eframe::Result<()> {
             egui_extras::install_image_loaders(&cc.egui_ctx);
             Ok(Box::new(TypingGameApp::new()))
         }),
-    )
+    );
+
+    // 3. run_native がエラーを返した場合にダイアログとログを出力
+    if let Err(err) = result {
+        let msg = format!("RapidType Launch Error:\n{:?}", err);
+        let _ = std::fs::write("error.log", &msg);
+        show_box("RapidType Launch Error", &msg);
+    }
 }
 
 fn setup_custom_fonts(ctx: &egui::Context) {

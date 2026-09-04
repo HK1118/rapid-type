@@ -4,8 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-eframe = { workspace = true }
 egui = { workspace = true }
 egui_extras = { workspace = true }
 rand = { workspace = true }
 game = { path = "../game" }
+
+[target.'cfg(target_pointer_width = "32")'.dependencies]
+eframe = { workspace = true, features = ["default_fonts", "glow"] }
+
+[target.'cfg(not(target_pointer_width = "32"))'.dependencies]
+eframe = { workspace = true, features = ["default_fonts", "wgpu", "wayland", "x11"] }

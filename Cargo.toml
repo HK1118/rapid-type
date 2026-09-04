@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "3"
 
 [workspace.dependencies]
-eframe = "0.36"
+eframe = { version = "0.36", default-features = false }
 egui = "0.36"
 egui_extras = { version = "0.36", features = ["image"]}
 rand = "0.10"
