@@ -287,7 +287,7 @@ pub fn hard_pool() -> Vec<Question> {
         Question::from_ruby("いつも[温|あたた]かいご[支|し][援|えん]をありがとうございます"),
         Question::from_ruby("いつもお[仕|し][事|ごと]ご[苦|く][労|ろう][様|さま]です"),
         Question::from_ruby("いつも[大|たい][変|へん]お[世|せ][話|わ]になっております"),
-        Question::from_ruby("[犬|いぬ]もあるけば[棒|ぼう]に[当|あ]たる"),
+        Question::from_ruby("[犬|いぬ]も[歩|ある]けば[棒|ぼう]に[当|あ]たる"),
         Question::from_ruby("イワシの[頭|あたま]も[信|しん][心|じん]から"),
         Question::from_ruby("うそつきは[泥|どろ][棒|ぼう]の[始|はじ]まり"),
         Question::from_ruby("[笑|え][顔|がお]を[忘|わす]れずに[毎|まい][日|にち]を[過|すご]す"),
